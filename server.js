@@ -45,8 +45,13 @@ function toTrack(r) {
   if (!id) return null;
   const parts = runsText(r.flexColumns?.[1]).split(' • ').map(s => s.trim()).filter(Boolean);
   const kind = TYPE_LABELS.has(parts[0]) ? parts.shift() : '';
+  const toMs = s => s.split(':').reduce((a, n) => a * 60 + +n, 0) * 1000;
+  const isTime = s => /^\d+(:\d{2}){1,2}$/.test(s || '');
   let duration = 0;
-  if (/^\d+(:\d{2}){1,2}$/.test(parts.at(-1) || '')) duration = parts.pop().split(':').reduce((a, n) => a * 60 + +n, 0) * 1000;
+  if (isTime(parts.at(-1))) duration = toMs(parts.pop());
+  // Album/playlist pages put the length in a fixed column instead.
+  const fixed = r.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text?.runs?.[0]?.text;
+  if (!duration && isTime(fixed)) duration = toMs(fixed);
   if (/views?$|plays?$/i.test(parts.at(-1) || '')) parts.pop();
   const thumbs = r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
   return {
@@ -82,26 +87,12 @@ async function search(q, type) {
   return (type === 'albums' || type === 'playlists' ? rows.map(toCollection) : rows.map(toTrack)).filter(Boolean);
 }
 
-// Every track of an album or playlist, via the watch queue YouTube Music builds for it.
+// Tracks of an album or playlist from its page. ('browse', like search, works from cloud hosts; 'next' gets refused there.)
+// Limitation: first page only (~100 tracks); follow continuations if longer playlists matter.
 async function collection(playlistId) {
-  const res = await innertube('next', { playlistId, enablePersistentPlaylistPanel: true, isAudioOnly: true });
-  const out = [];
-  (function walk(n) {
-    if (Array.isArray(n)) n.forEach(walk);
-    else if (n && typeof n === 'object') n.playlistPanelVideoRenderer ? out.push(n.playlistPanelVideoRenderer) : Object.values(n).forEach(walk);
-  })(res);
+  const res = await innertube('browse', { browseId: 'VL' + playlistId });
   const seen = new Set();
-  return out.filter(v => v.videoId && !seen.has(v.videoId) && seen.add(v.videoId)).slice(0, MAX_COLLECTION_TRACKS).map(v => {
-    const len = v.lengthText?.runs?.[0]?.text || '';
-    return {
-      id: v.videoId,
-      title: (v.title?.runs || []).map(r => r.text).join(''),
-      artist: (v.longBylineText?.runs || []).map(r => r.text).join('').split(' • ')[0] || '',
-      album: '',
-      duration: /^\d+(:\d{2}){1,2}$/.test(len) ? len.split(':').reduce((a, n) => a * 60 + +n, 0) * 1000 : 0,
-      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-    };
-  });
+  return listItems(res).map(toTrack).filter(t => t && !seen.has(t.id) && seen.add(t.id)).slice(0, MAX_COLLECTION_TRACKS);
 }
 
 async function suggest(q) {
