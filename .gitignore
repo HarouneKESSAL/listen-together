@@ -1,6 +1,7 @@
-# Published: the page, its search/WebSocket proxy, and docs. start.cmd stays local.
+# Published: the page, its search/WebSocket proxy, the Windows launcher, and docs.
 *
 !index.html
 !server.js
+!start.cmd
 !.gitignore
 !README.md
