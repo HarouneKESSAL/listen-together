@@ -1,5 +1,6 @@
-# Only the page is published (GitHub Pages); server.js and start.cmd stay local.
+# Published: the page, its search/WebSocket proxy, and docs. start.cmd stays local.
 *
 !index.html
+!server.js
 !.gitignore
 !README.md
