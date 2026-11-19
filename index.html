@@ -194,12 +194,25 @@ button { cursor: pointer; }
 .q-label { padding: 12px 12px 4px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--primary); }
 .q-item { display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 12px; border-radius: 16px; }
 .q-item.current { background: var(--secondary-container); color: var(--on-secondary-container); }
+.q-item.clickable { cursor: pointer; }
+.q-item.clickable:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
 .q-item.current .muted { color: inherit; opacity: .8; }
 .thumb { width: 48px; height: 48px; flex: none; border-radius: 8px; overflow: hidden; background: var(--sc-highest); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb img:not([src]), .thumb img[src=""] { display: none; }
 .q-item .grow { flex: 1; min-width: 0; }
 .empty { padding: 24px 12px; text-align: center; color: var(--on-surface-variant); }
+
+/* ---------- lyrics ---------- */
+.lyrics-card { display: flex; flex-direction: column; gap: 8px; }
+.lyrics { position: relative; max-height: 300px; overflow-y: auto; scroll-behavior: smooth; padding: 4px 0 120px; }
+.lyrics .ln { padding: 4px 0; font-size: 18px; line-height: 26px; font-weight: 600; color: var(--on-surface-variant); opacity: .45; transition: opacity .25s, color .25s; }
+.lyrics .ln.past { opacity: .7; }
+.lyrics .ln.on { opacity: 1; color: var(--primary); }
+.lyrics.synced.can-seek .ln { cursor: pointer; }
+.lyrics.plain { padding-bottom: 4px; }
+.lyrics.plain .ln { font-size: 15px; line-height: 22px; font-weight: 400; opacity: .9; }
+.lyrics .gap { height: 12px; }
 
 /* ---------- mini video viewer (bottom-end of the content surface) ---------- */
 .mini { position: absolute; right: 16px; bottom: 16px; width: 356px; height: 200px; border-radius: 16px; overflow: hidden; background: #000; box-shadow: 0 6px 20px rgba(0,0,0,.35); z-index: 2; }
@@ -350,6 +363,13 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="muted ellipsis" id="npArtist"></div>
                 <div class="bar"><i id="npBar"></i></div>
               </div>
+              <div class="card lyrics-card" id="lyricsCard" style="order:3" hidden>
+                <div class="section-head">
+                  <div class="section-title">Lyrics</div>
+                  <div class="muted body-s" id="lyricsNote"></div>
+                </div>
+                <div class="lyrics" id="lyrics"></div>
+              </div>
               <div style="order:3;display:flex;flex-direction:column;gap:4px" id="upNextBox" hidden>
                 <div class="section-head">
                   <div class="section-title">Up next</div>
@@ -390,6 +410,8 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
           <div class="chips" role="group" aria-label="Filter">
             <button type="button" data-type="songs"><span class="ms">check</span>Songs</button>
             <button type="button" data-type="videos"><span class="ms">check</span>Videos</button>
+            <button type="button" data-type="albums"><span class="ms">check</span>Albums</button>
+            <button type="button" data-type="playlists"><span class="ms">check</span>Playlists</button>
           </div>
           <div class="grp results" id="resultList"></div>
         </div>
@@ -506,6 +528,7 @@ message LeaveRoomPayload {}
 message ApproveJoinPayload { string user_id = 1; }
 message RejectJoinPayload { string user_id = 1; string reason = 2; }
 message KickUserPayload { string user_id = 1; string reason = 2; }
+message TransferHostPayload { string new_host_id = 1; }
 message PlaybackActionPayload { string action = 1; string track_id = 2; int64 position = 3; TrackInfo track_info = 4; bool insert_next = 5; repeated TrackInfo queue = 6; string queue_title = 7; float volume = 8; int64 server_time = 9; uint64 revision = 10; int64 captured_at_server_time = 11; bool replace_queue = 12; string origin_user_id = 13; uint64 host_sequence = 14; }
 message PingPayload { int64 client_time = 1; uint64 sequence = 2; }
 message BufferReadyPayload { string track_id = 1; uint64 track_revision = 2; }
@@ -538,7 +561,7 @@ const Envelope = root.lookupType('listentogether.Envelope');
 // Envelope type -> payload message. Types not listed carry no payload we use.
 const TYPES = {
   client_capabilities: 'ClientCapabilities', create_room: 'CreateRoomPayload', join_room: 'JoinRoomPayload',
-  leave_room: 'LeaveRoomPayload', approve_join: 'ApproveJoinPayload', reject_join: 'RejectJoinPayload', kick_user: 'KickUserPayload',
+  leave_room: 'LeaveRoomPayload', approve_join: 'ApproveJoinPayload', reject_join: 'RejectJoinPayload', kick_user: 'KickUserPayload', transfer_host: 'TransferHostPayload',
   playback_action: 'PlaybackActionPayload', buffer_ready: 'BufferReadyPayload', ping: 'PingPayload', reconnect: 'ReconnectPayload',
   server_capabilities: 'ServerCapabilities', room_created: 'RoomCreatedPayload', join_request: 'JoinRequestPayload',
   join_approved: 'JoinApprovedPayload', join_rejected: 'JoinRejectedPayload', user_joined: 'UserJoinedPayload',
@@ -606,7 +629,7 @@ let conn = 'idle';                    // idle | connecting | connected | reconne
 let joinPending = false;
 let ws, leaving = false, pingSeq = 0, hostSeq = 0, clockOffset = null;
 let me = {};                          // { id, token }
-const room = { code: '', hostId: '', users: new Map(), queue: [], pending: new Map(), suggestions: new Map() };
+const room = { code: '', hostId: '', users: new Map(), queue: [], queueTitle: '', pending: new Map(), suggestions: new Map() };
 let track = null;                     // TrackInfo currently loaded
 let anchor = null;                    // { pos ms, at server ms, playing } — the room timeline
 let player, playerReady = false, applyingRemote = false, hostAutoplay = false;
@@ -634,7 +657,14 @@ async function decodeFrame(buf) {
   return [env.type, T ? T.toObject(T.decode(bytes), { longs: Number, defaults: true, arrays: true }) : {}];
 }
 
-function connect(afterOpen) {
+// Free hosting (Render) sleeps when unused; the first connection can take up to a minute while it wakes.
+let connectStarted = 0;
+const WAKE_GRACE_MS = 90000;
+const waking = () => BACKEND && conn === 'connecting' && Date.now() - connectStarted > 3000;
+if (BACKEND) fetch(BACKEND + '/api/suggest?q=').catch(() => {});   // start waking it as soon as the page opens
+
+function connect(afterOpen, retry = false) {
+  if (!retry) connectStarted = Date.now();
   leaving = false;
   conn = me.token ? 'reconnecting' : 'connecting';
   renderStatus();
@@ -651,6 +681,10 @@ function connect(afterOpen) {
   };
   ws.onclose = () => {
     if (leaving) return;
+    if (!me.token && BACKEND && conn === 'connecting' && Date.now() - connectStarted < WAKE_GRACE_MS) {
+      setTimeout(() => { if (!leaving) connect(afterOpen, true); }, 3000);   // host still waking up: keep trying
+      return;
+    }
     if (!me.token) { conn = 'error'; joinPending = false; renderLobby(); return; }
     conn = 'reconnecting';
     renderStatus();
@@ -720,6 +754,7 @@ function enterRoom(code, s) {
 
 function applyState(s) {
   room.queue = s.queue || [];
+  room.queueTitle = s.queue_title || '';
   renderQueue();
   if (s.current_track?.id) loadTrack(s.current_track, { pos: s.position, at: s.last_update, playing: s.is_playing });
 }
@@ -727,7 +762,7 @@ function applyState(s) {
 function onSync(p) {
   const own = p.origin_user_id && p.origin_user_id === me.id;
   if (p.queue && ['change_track', 'queue_add', 'queue_remove', 'queue_clear', 'sync_queue'].includes(p.action)) {
-    room.queue = p.queue; renderQueue();
+    room.queue = p.queue; room.queueTitle = p.queue_title || ''; renderQueue();
     if (p.action !== 'change_track') startQueueIfIdle();   // e.g. host approved a suggestion while nothing was playing
   }
   switch (p.action) {
@@ -743,6 +778,7 @@ function onSync(p) {
 function loadTrack(t, anc) {
   const changed = track?.id !== t.id;
   track = t; anchor = anc; stalled = starting = false;
+  if (changed) remember(t);
   renderTrack(changed);
   if (!playerReady) return;            // onReady picks it up
   if (changed || player.getVideoData()?.video_id !== t.id) {
@@ -836,10 +872,11 @@ async function trackFromInput(input) {
 let stalled = false, starting = false;
 function startQueueIfIdle() { if (isHost() && !starting && room.queue.length && (!track || stalled)) skipNext(); }
 
-function changeTrack(info) {
+// extra: { queue, replace_queue, queue_title } replaces the upcoming queue in the same step.
+function changeTrack(info, extra = {}) {
   hostAutoplay = true; starting = true;
   hostSeq = Math.max(hostSeq + 1, Date.now());
-  send('playback_action', { action: 'change_track', track_id: info.id, track_info: info, host_sequence: hostSeq });
+  send('playback_action', { action: 'change_track', track_id: info.id, track_info: info, host_sequence: hostSeq, ...extra });
 }
 function skipNext() { if (room.queue.length) changeTrack(room.queue[0]); }
 
@@ -951,7 +988,38 @@ function renderResults() {
   if (search.state === 'error') return list.replaceChildren(h('div', { class: 'empty' },
     h('div', { text: 'Search is unavailable right now.' }), h('button', { class: 'btn-t', type: 'button', onclick: loadResults, text: 'Retry' })));
   if (!search.items.length) return list.replaceChildren(h('div', { class: 'empty', text: 'No results' }));
-  list.replaceChildren(...search.items.map(t => trackRow(t, { kind: search.type === 'videos' ? 'Video' : 'Song' })));
+  const collections = search.type === 'albums' || search.type === 'playlists';
+  list.replaceChildren(...search.items.map(t => collections ? collectionRow(t) : trackRow(t, { kind: search.type === 'videos' ? 'Video' : 'Song' })));
+}
+
+function collectionRow(c) {
+  const host = isHost();
+  return h('div', { class: 'item', role: 'button', tabindex: '0', title: host ? 'Play all' : 'Only the host can play albums and playlists',
+      onclick: () => playCollection(c), onkeydown: e => { if (e.key === 'Enter') playCollection(c); } },
+    art({ thumbnail: c.thumbnail }),
+    h('div', { class: 'grow' }, h('div', { class: 'item-t ellipsis', text: c.title }), h('div', { class: 'muted ellipsis', text: c.subtitle })),
+    host && h('button', { class: 'icon-btn', type: 'button', title: 'Add all to queue', onclick: e => { e.stopPropagation(); playCollection(c, true); } }, icon('playlist_add')));
+}
+
+// Host: play an album/playlist now (it replaces the queue), or append its songs to the queue.
+async function playCollection(c, append = false) {
+  if (!isHost()) return snack('Only the host can play albums and playlists');
+  let tracks;
+  try {
+    const r = await fetch(`${BACKEND}/api/collection?id=${encodeURIComponent(c.playlistId)}`);
+    if (!r.ok) throw new Error();
+    tracks = await r.json();
+  } catch { return snack(`Couldn't load “${c.title}”`); }
+  if (!tracks.length) return snack(`“${c.title}” has no playable songs`);
+  if (append && track) {
+    const have = new Set([track.id, ...room.queue.map(t => t.id)]);
+    const add = tracks.filter(t => !have.has(t.id));
+    send('playback_action', { action: 'sync_queue', queue: [...room.queue, ...add], queue_title: room.queueTitle || c.title });
+    snack(`Added ${add.length} songs from “${c.title}” to the queue`);
+  } else {
+    changeTrack(tracks[0], { queue: tracks.slice(1), replace_queue: true, queue_title: c.title });
+    snack(`Playing “${c.title}”`);
+  }
 }
 
 document.querySelectorAll('.chips button').forEach(b => { b.onclick = () => { if (search.type !== b.dataset.type) { search.type = b.dataset.type; loadResults(); } }; });
@@ -997,6 +1065,7 @@ setInterval(() => {
   const seek = $('seek');
   if (document.activeElement !== seek) { seek.value = Math.round(frac * 1000); seek.style.setProperty('--p', frac * 100 + '%'); }
   $('npBar').style.width = frac * 100 + '%';
+  tickLyrics();
 }, 250);
 
 // ---- rendering ----
@@ -1029,13 +1098,15 @@ function renderCode() {
 const CONN_TEXT = { connecting: 'Connecting…', reconnecting: 'Reconnecting…', error: 'Connection error', connected: 'Connected', idle: 'Disconnected' };
 function renderStatus() {
   const s = $('lobbyStatus');
-  const text = conn === 'connecting' ? CONN_TEXT.connecting
+  const text = waking() ? `Waking up the server… ${Math.round((Date.now() - connectStarted) / 1000)}s (free hosting sleeps when nobody's using it; this can take up to a minute)`
+    : conn === 'connecting' ? CONN_TEXT.connecting
     : conn === 'error' ? CONN_TEXT.error
     : joinPending && joinMode ? 'Waiting for the host to approve your request…'
     : joinPending ? 'Connecting…' : '';
   s.replaceChildren(...(joinPending || conn === 'connecting' ? [h('span', { class: 'spinner' })] : []), text);
   $('connLabel').textContent = CONN_TEXT[conn];
 }
+setInterval(() => { if (conn === 'connecting') renderStatus(); }, 1000);   // tick the waking counter
 
 function renderRoom() {
   $('roomCode').textContent = room.code.match(/.{1,4}/g)?.join(' ') || '';
@@ -1046,6 +1117,7 @@ function renderRoom() {
   if (!$('results').hidden) renderResults();   // row actions differ for host and guests
   $('controls').hidden = $('compactPlay').hidden = !host;
   $('seek').disabled = !host;
+  if (lyrics) renderLyrics();   // tap-to-seek is host-only
   renderPeople();
   renderQueue();
   renderPlayState();
@@ -1062,7 +1134,10 @@ function renderPeople() {
       h('div', { class: 'pname ellipsis', text: u.name + (self ? ' (you)' : '') }),
       isRoomHost && u.online ? h('div', { class: 'tag', text: 'Host' }) : !u.online ? h('div', { class: 'tag', text: 'Disconnected' }) : null);
     btn.disabled = !(host && !self);
-    btn.onclick = () => openMenu(btn, u.name, [['logout', 'Kick', () => send('kick_user', { user_id: id })]]);
+    btn.onclick = () => openMenu(btn, u.name, [
+      ...(u.online ? [['star', 'Make host', () => send('transfer_host', { new_host_id: id })]] : []),
+      ['logout', 'Kick', () => send('kick_user', { user_id: id })],
+    ]);
     return btn;
   }));
   $('pendingBox').hidden = !(host && room.pending.size);
@@ -1104,6 +1179,7 @@ function renderTrack(changed) {
   $('mini').hidden = !t;
   $('content').classList.toggle('has-video', !!t);
   if (changed) t ? window.themeFromArtwork?.([safeImg(t.thumbnail), ytThumb(t.id)].filter(Boolean)) : window.themeReset?.();
+  if (changed) loadLyrics(t);
   renderQueue();
 }
 
@@ -1115,23 +1191,119 @@ function renderPlayState() {
   $('nextBtn').disabled = !room.queue.length;
 }
 
-function queueRow(t, current) {
+// Recently played, per device (localStorage). Host taps to replay; guests tap to suggest.
+let played = (() => { try { return JSON.parse(store.get('lt-history')) || []; } catch { return []; } })();
+function remember(t) {
+  played = [t, ...played.filter(p => p.id !== t.id)].slice(0, 20);
+  store.set('lt-history', JSON.stringify(played));
+}
+
+// kind: 'current' | 'next' (upcoming queue) | 'history'
+function queueRow(t, kind) {
   const host = isHost();
-  return h('div', { class: 'q-item' + (current ? ' current' : '') },
+  const play = kind === 'next' && host
+    ? () => changeTrack(t, { queue: room.queue.filter(q => q.id !== t.id), replace_queue: true, queue_title: room.queueTitle })   // jump, keep the rest
+    : kind === 'history' ? () => pickTrack(t) : null;
+  const act = (fn, e) => { e.stopPropagation(); fn(); };
+  return h('div', { class: 'q-item' + (kind === 'current' ? ' current' : '') + (play ? ' clickable' : ''),
+      ...(play && { role: 'button', tabindex: '0', title: host ? 'Play now' : 'Suggest to the host', onclick: play, onkeydown: e => { if (e.key === 'Enter') play(); } }) },
     art(t),
     h('div', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:500', text: t.title }), h('div', { class: 'muted ellipsis body-s', text: t.artist || '' })),
-    !current && host ? h('button', { class: 'icon-btn', type: 'button', title: 'Remove', onclick: () => send('playback_action', { action: 'queue_remove', track_id: t.id }) }, icon('close')) : null);
+    kind === 'next' && host ? h('button', { class: 'icon-btn', type: 'button', title: 'Remove', onclick: e => act(() => send('playback_action', { action: 'queue_remove', track_id: t.id }), e) }, icon('close'))
+      : kind === 'history' && host ? h('button', { class: 'icon-btn', type: 'button', title: 'Add to queue', onclick: e => act(() => queueTrack(t), e) }, icon('playlist_add'))
+      : null);
 }
 
 function renderQueue() {
   const rows = [];
-  if (track) rows.push(h('div', { class: 'q-label', text: 'Now playing' }), queueRow(track, true));
-  rows.push(h('div', { class: 'q-label', text: 'Up next' }));
-  rows.push(...(room.queue.length ? room.queue.map(t => queueRow(t, false)) : [h('div', { class: 'empty', text: 'Nothing queued' })]));
+  if (track) rows.push(h('div', { class: 'q-label', text: 'Now playing' }), queueRow(track, 'current'));
+  rows.push(h('div', { class: 'q-label', text: room.queueTitle ? `Up next · ${room.queueTitle}` : 'Up next' }));
+  rows.push(...(room.queue.length ? room.queue.map(t => queueRow(t, 'next')) : [h('div', { class: 'empty', text: 'Nothing queued' })]));
+  const recent = played.filter(p => p.id !== track?.id).slice(0, 10);
+  if (recent.length) rows.push(h('div', { class: 'q-label', text: 'Recently played' }), ...recent.map(t => queueRow(t, 'history')));
   $('qList').replaceChildren(...rows);
-  $('upNext').replaceChildren(...room.queue.map(t => queueRow(t, false)));
+  $('upNext').replaceChildren(...room.queue.map(t => queueRow(t, 'next')));
   $('upNextBox').hidden = !room.queue.length;
   $('nextBtn').disabled = !room.queue.length;
+}
+
+// ---- lyrics: LRCLIB (free, no key, allows browser requests). Each listener fetches their own copy;
+// lines follow their own player, which the room keeps in sync. ----
+const lyricsCache = new Map();   // track id -> { synced: [{ t, text }] } | { plain: [text] } | null
+let lyrics = null, lyricsIdx = -1;
+
+// "Song (Official Video) | Label" -> "Song", so LRCLIB can match video titles too.
+const cleanTitle = s => (s || '')
+  .replace(/\s*[(\[][^)\]]*\b(official|lyrics?|video|audio|visuali[sz]er|mv|hd|4k|remaster(ed)?|explicit)\b[^)\]]*[)\]]/gi, '')
+  .replace(/\s*\|.*$/, '').trim();
+
+function parseLrc(lrc) {
+  const out = [];
+  for (const line of lrc.split('\n')) {
+    const text = line.replace(/\[[^\]]*\]/g, '').trim();
+    for (const m of line.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)) out.push({ t: (+m[1] * 60 + +m[2]) * 1000, text });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+async function findLyrics(t) {
+  let title = cleanTitle(t.title), artist = (t.artist || '').replace(/ - Topic$/, '');
+  if (!artist && title.includes(' - ')) [artist, title] = title.split(' - ', 2).map(s => s.trim());
+  const mainArtist = artist.split(/,| & | x | feat\.? /i)[0].trim();
+  const get = async url => { const r = await fetch(url); return r.ok ? r.json() : null; };
+  // Exact match first (no duration: video versions run longer than the album track), then fuzzy search.
+  let hit = mainArtist ? await get('https://lrclib.net/api/get?' + new URLSearchParams({ track_name: title, artist_name: mainArtist })) : null;
+  if (!hit?.syncedLyrics) {
+    const list = await get('https://lrclib.net/api/search?' + new URLSearchParams({ q: `${title} ${mainArtist}`.trim() })) || [];
+    hit = list.find(x => x.syncedLyrics) || (hit?.plainLyrics ? hit : list.find(x => x.plainLyrics));
+  }
+  if (hit?.syncedLyrics) return { synced: parseLrc(hit.syncedLyrics) };
+  if (hit?.plainLyrics) return { plain: hit.plainLyrics.split('\n') };
+  return null;
+}
+
+async function loadLyrics(t) {
+  lyrics = null; lyricsIdx = -1;
+  $('lyricsCard').hidden = !t;
+  if (!t) return;
+  renderLyrics('Looking for lyrics…');
+  if (!lyricsCache.has(t.id)) {
+    let found = null;
+    try { found = await findLyrics(t); } catch {}
+    lyricsCache.set(t.id, found);
+  }
+  if (track?.id !== t.id) return;   // song changed while we were looking
+  lyrics = lyricsCache.get(t.id);
+  renderLyrics('No lyrics found for this song');
+}
+
+function renderLyrics(msg) {
+  const box = $('lyrics');
+  box.className = 'lyrics' + (lyrics?.synced ? ' synced' : lyrics?.plain ? ' plain' : '') + (isHost() ? ' can-seek' : '');
+  $('lyricsNote').textContent = lyrics?.plain ? 'Not synced' : lyrics?.synced && isHost() ? 'Tap a line to jump there' : '';
+  if (!lyrics) return box.replaceChildren(h('div', { class: 'muted', text: msg }));
+  // One child per line (blank lines become spacers) so line index == child index.
+  box.replaceChildren(...(lyrics.synced || lyrics.plain).map(l => {
+    const text = typeof l === 'string' ? l : l.text;
+    if (!text) return h('div', { class: 'gap' });
+    const el = h('div', { class: 'ln', text });
+    if (lyrics.synced) el.onclick = () => { if (isHost() && playerReady) { player.seekTo(l.t / 1000, true); hostAction('seek'); } };
+    return el;
+  }));
+  box.scrollTop = 0;
+  lyricsIdx = -1;   // re-highlight on the next tick
+}
+
+function tickLyrics() {
+  if (!lyrics?.synced || !playerReady || $('lyricsCard').hidden) return;
+  const now = player.getCurrentTime() * 1000 + 300;   // light the line up just before it's sung
+  const i = lyrics.synced.findLastIndex(l => l.t <= now);
+  if (i === lyricsIdx) return;
+  lyricsIdx = i;
+  const box = $('lyrics');
+  [...box.children].forEach((el, j) => { el.classList.toggle('on', j === i); el.classList.toggle('past', j < i); });
+  const cur = box.children[i];
+  if (cur) box.scrollTop = cur.offsetTop - box.clientHeight / 3;
 }
 
 // ---- menu + dialog ----

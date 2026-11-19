@@ -8,7 +8,11 @@ const PORT = Number(process.env.PORT) || 5500;
 const PAGE = new URL('./index.html', import.meta.url);
 const CLIENT = { clientName: 'WEB_REMIX', clientVersion: '1.20260707.12.00', hl: 'en', gl: 'US' };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
-const FILTERS = { songs: 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D', videos: 'EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D' };
+const FILTERS = {
+  songs: 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D', videos: 'EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D',
+  albums: 'EgWKAQIYAWoKEAkQBRAKEAMQBA%3D%3D', playlists: 'EgeKAQQoAEABagoQAxAEEAoQCRAF',
+};
+const MAX_COLLECTION_TRACKS = 100;
 
 async function innertube(endpoint, body) {
   const r = await fetch(`https://music.youtube.com/youtubei/v1/${endpoint}?prettyPrint=false`, {
@@ -57,9 +61,47 @@ function toTrack(r) {
   };
 }
 
+const bigArt = url => url?.replace(/=w\d+-h\d+.*$/, '=w544-h544');
+
+// Album / playlist search row -> { playlistId, title, subtitle, thumbnail }, or null.
+function toCollection(r) {
+  const playlistId = r.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer
+    ?.playNavigationEndpoint?.watchPlaylistEndpoint?.playlistId;
+  if (!playlistId) return null;
+  return {
+    playlistId,
+    title: runsText(r.flexColumns?.[0]),
+    subtitle: runsText(r.flexColumns?.[1]),   // "Album • Daft Punk • 2013" / "Owner • 5.9M views"
+    thumbnail: bigArt(r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at(-1)?.url) || '',
+  };
+}
+
 async function search(q, type) {
   const res = await innertube('search', { query: q, params: FILTERS[type] });
-  return listItems(res).map(toTrack).filter(Boolean);
+  const rows = listItems(res);
+  return (type === 'albums' || type === 'playlists' ? rows.map(toCollection) : rows.map(toTrack)).filter(Boolean);
+}
+
+// Every track of an album or playlist, via the watch queue YouTube Music builds for it.
+async function collection(playlistId) {
+  const res = await innertube('next', { playlistId, enablePersistentPlaylistPanel: true, isAudioOnly: true });
+  const out = [];
+  (function walk(n) {
+    if (Array.isArray(n)) n.forEach(walk);
+    else if (n && typeof n === 'object') n.playlistPanelVideoRenderer ? out.push(n.playlistPanelVideoRenderer) : Object.values(n).forEach(walk);
+  })(res);
+  const seen = new Set();
+  return out.filter(v => v.videoId && !seen.has(v.videoId) && seen.add(v.videoId)).slice(0, MAX_COLLECTION_TRACKS).map(v => {
+    const len = v.lengthText?.runs?.[0]?.text || '';
+    return {
+      id: v.videoId,
+      title: (v.title?.runs || []).map(r => r.text).join(''),
+      artist: (v.longBylineText?.runs || []).map(r => r.text).join('').split(' • ')[0] || '',
+      album: '',
+      duration: /^\d+(:\d{2}){1,2}$/.test(len) ? len.split(':').reduce((a, n) => a * 60 + +n, 0) * 1000 : 0,
+      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+    };
+  });
 }
 
 async function suggest(q) {
@@ -89,8 +131,13 @@ const server = http.createServer(async (req, res) => {
     }
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
     if (url.pathname === '/api/search') {
-      const type = url.searchParams.get('type') === 'videos' ? 'videos' : 'songs';
+      const type = Object.hasOwn(FILTERS, url.searchParams.get('type')) ? url.searchParams.get('type') : 'songs';
       return json(res, 200, q ? await search(q, type) : []);
+    }
+    if (url.pathname === '/api/collection') {
+      const id = url.searchParams.get('id') || '';
+      if (!/^[\w-]{2,80}$/.test(id)) return json(res, 400, { error: 'Bad playlist id' });
+      return json(res, 200, await collection(id));
     }
     if (url.pathname === '/api/suggest') return json(res, 200, q ? await suggest(q) : { queries: [], items: [] });
     res.writeHead(404).end();
