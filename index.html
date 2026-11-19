@@ -596,10 +596,8 @@ function copy(text, what) {
 // ---- state ----
 const params = new URLSearchParams(location.search);
 let username = store.get('lt-name') || '';
-// On GitHub Pages the page is static; search and rooms come from server.js on the host PC via its ngrok address.
-// (ngrok's free-plan warning page only hits plain page loads: the header below skips it for API calls, and WebSockets pass.)
-const BACKEND = location.hostname.endsWith('github.io') ? 'https://motion-tidal-june.ngrok-free.dev' : '';
-const API_HEADERS = BACKEND ? { 'ngrok-skip-browser-warning': '1' } : {};
+// On GitHub Pages the page is static; search and rooms come from the Render deployment (Dockerfile + render.yaml).
+const BACKEND = location.hostname.endsWith('github.io') ? 'https://listen-together-f6kt.onrender.com' : '';
 let serverUrl = params.get('server') || store.get('lt-server') ||
   (BACKEND ? BACKEND.replace(/^http/, 'ws') : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || 'localhost:5500'}`) + '/ws'; // server.js proxies /ws to metroserver
 let joinMode = !!params.get('room');
@@ -881,7 +879,7 @@ async function loadSuggest(q) {
   suggestAbort?.abort();
   suggestAbort = new AbortController();
   try {
-    const r = await fetch(BACKEND + '/api/suggest?q=' + encodeURIComponent(q), { signal: suggestAbort.signal, headers: API_HEADERS });
+    const r = await fetch(BACKEND + '/api/suggest?q=' + encodeURIComponent(q), { signal: suggestAbort.signal });
     if (!r.ok) return;
     const { queries, items } = await r.json();
     const panel = [];
@@ -934,7 +932,7 @@ async function loadResults() {
   search.state = 'loading';
   renderResults();
   try {
-    const r = await fetch(`${BACKEND}/api/search?type=${search.type}&q=${encodeURIComponent(search.query)}`, { signal: resultsAbort.signal, headers: API_HEADERS });
+    const r = await fetch(`${BACKEND}/api/search?type=${search.type}&q=${encodeURIComponent(search.query)}`, { signal: resultsAbort.signal });
     if (!r.ok) throw new Error();
     search.items = await r.json();
     search.state = 'done';
