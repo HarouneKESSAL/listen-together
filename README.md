@@ -52,7 +52,7 @@ Needs [Node.js](https://nodejs.org) 18+ and [Docker](https://www.docker.com).
 
 On Windows, if the Docker build fails in `generate_proto.sh`, convert metroserver's `scripts/*.sh` to LF line endings first.
 
-On Windows, `start.cmd` does steps 1–2 in one go (starts the `metroserver` container, `server.js`, and an ngrok tunnel). It has this deployment's ngrok domain hard-coded; replace it with your own, or drop the ngrok line if you only need local/Wi-Fi access.
+On Windows, after the one-time build in step 1, `start.cmd` starts everything in one go (the `metroserver` container, `server.js`, and an ngrok tunnel). It has this deployment's ngrok domain hard-coded; replace it with your own, or drop the ngrok line if you only need local/Wi-Fi access.
 
 The proxy has no rate limiting or caching, so only share its address with people you trust.
 
