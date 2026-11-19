@@ -1,7 +1,9 @@
-# Published: the page, its search/WebSocket proxy, the Windows launcher, and docs.
+# Published: the page, its proxy, the Windows launcher, cloud deploy files, and docs.
 *
 !index.html
 !server.js
 !start.cmd
 !.gitignore
 !README.md
+!Dockerfile
+!render.yaml

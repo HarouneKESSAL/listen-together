@@ -26,6 +26,14 @@ Playback goes through YouTube's embedded player, so press play once if your brow
 
 Metrolist app users can join the same rooms by setting a custom Listen Together server in the app to the room server's `wss://…/ws` address.
 
+## Host it free (Render)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HarouneKESSAL/listen-together)
+
+The `Dockerfile` bundles metroserver and `server.js` into one container; `render.yaml` deploys it on Render's free plan. Everything (page, search, rooms) is served from the one `onrender.com` address, and pushes to `main` redeploy automatically.
+
+Free-plan limits: the service sleeps after about 15 minutes with no traffic. The next visitor wakes it, which takes up to a minute, and rooms that were open when it went to sleep are gone.
+
 ## Run it yourself
 
 Needs [Node.js](https://nodejs.org) 18+ and [Docker](https://www.docker.com).
