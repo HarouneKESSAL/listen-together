@@ -1,0 +1,1244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Listen Together</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400,0..1,0&display=block">
+<script src="https://cdn.jsdelivr.net/npm/protobufjs@7.4.0/dist/protobuf.min.js"></script>
+<style>
+/* Material 3 roles. Static values are the baseline scheme (seed #6750A4); the module
+   script below regenerates them from the seed / current artwork, like the desktop app. */
+:root {
+  color-scheme: dark;
+  --primary:#d0bcff; --on-primary:#381e72; --primary-container:#4f378b; --on-primary-container:#eaddff;
+  --secondary-container:#4a4458; --on-secondary-container:#e8def8;
+  --surface:#141218; --on-surface:#e6e0e9; --on-surface-variant:#cac4d0; --surface-variant:#49454f;
+  --sc-lowest:#0f0d13; --sc-low:#1d1b20; --sc:#211f26; --sc-high:#2b2930; --sc-highest:#36343b;
+  --outline:#938f99; --outline-variant:#49454f;
+  --error:#f2b8b5; --error-container:#8c1d18; --on-error-container:#f9dedc;
+  --inverse-surface:#e6e0e9; --inverse-on-surface:#322f35;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --primary:#6750a4; --on-primary:#fff; --primary-container:#eaddff; --on-primary-container:#4f378b;
+    --secondary-container:#e8def8; --on-secondary-container:#4a4458;
+    --surface:#fef7ff; --on-surface:#1d1b20; --on-surface-variant:#49454f; --surface-variant:#e7e0ec;
+    --sc-lowest:#fff; --sc-low:#f7f2fa; --sc:#f3edf7; --sc-high:#ece6f0; --sc-highest:#e6e0e9;
+    --outline:#79747e; --outline-variant:#cac4d0;
+    --error:#b3261e; --error-container:#f9dedc; --on-error-container:#8c1d18;
+    --inverse-surface:#322f35; --inverse-on-surface:#f5eff7;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--sc); color: var(--on-surface); overflow: hidden;
+  font: 400 14px/20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  transition: background-color .4s var(--ease), color .4s var(--ease);
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+.ms {
+  font-family: 'Material Symbols Rounded'; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1;
+  display: inline-block; white-space: nowrap; font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; user-select: none;
+}
+.fill { font-variation-settings: 'FILL' 1; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { color: var(--on-surface-variant); }
+.body-s { font-size: 12px; line-height: 16px; }
+
+/* ---------- app shell (rail | top bar + content + queue pane) / bottom player ---------- */
+.app { display: grid; height: 100dvh; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.rail { width: 96px; padding: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.rail-item { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--on-surface); }
+.rail-item .ind { width: 56px; height: 32px; border-radius: 16px; display: grid; place-items: center; background: var(--secondary-container); color: var(--on-secondary-container); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { height: 64px; flex: none; display: flex; align-items: center; padding: 8px 8px 0 0; }
+.search {
+  flex: 0 1 560px; height: 48px; border-radius: 24px; background: var(--sc-high);
+  display: flex; align-items: center; gap: 4px; padding: 0 4px 0 16px;
+}
+.search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; font-size: 16px; line-height: 24px; }
+.search input::placeholder { color: var(--on-surface-variant); }
+.search:has(input:disabled) { opacity: .6; }
+.search input::-webkit-search-cancel-button { display: none; }
+.topbar { position: relative; }
+
+/* Grouped list (desktop search rows): 24dp outer corners, 6dp between items. */
+.grp { display: flex; flex-direction: column; gap: 2px; }
+.grp > * { border-radius: 6px; }
+.grp > :first-child { border-top-left-radius: 24px; border-top-right-radius: 24px; }
+.grp > :last-child { border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; }
+.item { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 8px 8px 12px; background: var(--sc); cursor: pointer; transition: background-color .15s; }
+.item:hover { background: var(--sc-high); }
+.item .grow { flex: 1; min-width: 0; }
+.item-t { font-size: 16px; line-height: 24px; font-weight: 500; }
+.thumb.wide { width: 85px; height: 48px; }
+.thumb.sm { width: 40px; height: 40px; }
+.suggest {
+  position: absolute; top: 60px; left: 0; z-index: 15; width: min(560px, 100%); max-height: min(70vh, 640px); overflow: auto;
+  padding: 8px; border-radius: 28px; background: var(--sc-low); box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.suggest h3 { margin: 8px 12px 8px; font-size: 18px; line-height: 24px; font-weight: 700; color: var(--primary); }
+.suggest .item { min-height: 52px; }
+.chips { display: flex; gap: 8px; padding: 0 16px 12px; }
+.chips button { height: 32px; padding: 0 16px; border: 1px solid var(--outline-variant); border-radius: 8px; background: transparent; color: var(--on-surface-variant); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
+.chips button .ms { display: none; font-size: 18px; }
+.chips button[aria-pressed="true"] { padding-left: 8px; border-color: transparent; background: var(--secondary-container); color: var(--on-secondary-container); }
+.chips button[aria-pressed="true"] .ms { display: inline-block; }
+.results { padding: 0 16px 24px; }
+.skel { height: 64px; background: var(--sc); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .5; } }
+.panes-row { flex: 1; display: flex; min-height: 0; padding: 8px 8px 8px 0; }
+.content { position: relative; flex: 1; min-width: 0; background: var(--surface); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; transition: background-color .4s var(--ease); }
+.scroll { flex: 1; overflow: auto; }
+.content.has-video .scroll { padding-bottom: 232px; }
+
+/* ---------- buttons ---------- */
+.btn {
+  height: 56px; padding: 0 24px; border: 0; border-radius: 28px; background: var(--primary); color: var(--on-primary);
+  font-size: 16px; line-height: 24px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  transition: border-radius .25s var(--ease), filter .2s;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { border-radius: 16px; }
+.btn:disabled { background: color-mix(in srgb, var(--on-surface) 12%, transparent); color: color-mix(in srgb, var(--on-surface) 38%, transparent); filter: none; cursor: default; border-radius: 28px; }
+.btn.full { width: 100%; }
+.btn.danger { background: var(--error-container); color: var(--on-error-container); min-width: 200px; }
+.btn-o {
+  height: 40px; padding: 0 16px; border: 1px solid var(--outline-variant); border-radius: 20px; background: transparent; color: var(--on-surface-variant);
+  font-size: 14px; line-height: 20px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; transition: border-radius .25s var(--ease), background-color .2s;
+}
+.btn-o:hover { background: color-mix(in srgb, var(--on-surface-variant) 8%, transparent); }
+.btn-o:active { border-radius: 12px; }
+.btn-o .ms { font-size: 18px; }
+.btn-t { height: 40px; padding: 0 12px; border: 0; border-radius: 20px; background: transparent; color: var(--primary); font-weight: 500; }
+.btn-t:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.icon-btn { width: 40px; height: 40px; flex: none; border: 0; border-radius: 20px; background: transparent; color: var(--on-surface-variant); display: grid; place-items: center; transition: border-radius .25s var(--ease), background-color .2s; }
+.icon-btn:hover { background: color-mix(in srgb, var(--on-surface-variant) 8%, transparent); }
+.icon-btn:active { border-radius: 12px; }
+.icon-btn:disabled { opacity: .38; cursor: default; background: none; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ---------- Listen Together screen ---------- */
+.panes { display: flex; flex-direction: column; gap: 16px; padding: 8px 16px 24px; }
+.panes > .col { display: contents; }
+.two .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; align-items: start; }
+.two .panes > .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.hero { display: flex; align-items: center; gap: 16px; padding-bottom: 8px; }
+.hero h1 { margin: 0 0 8px; font-size: 32px; line-height: 36px; font-weight: 800; white-space: pre-line; }
+.cookie { width: 80px; height: 80px; flex: none; clip-path: var(--cookie); background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center; }
+.cookie .ms { font-size: 40px; }
+.seg { display: flex; gap: 4px; padding: 4px; border-radius: 32px; background: var(--sc); }
+.seg button { flex: 1; height: 56px; border: 0; border-radius: 28px; background: transparent; color: var(--on-surface-variant); font-size: 16px; line-height: 24px; font-weight: 600; transition: border-radius .25s var(--ease), background-color .25s var(--ease), color .25s; }
+.seg button:active { border-radius: 12px; }
+.seg button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 800; }
+.heading { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; }
+.heading h2 { margin: 0; font-size: 28px; line-height: 36px; font-weight: 800; }
+.row-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 24px; background: var(--sc); }
+.row-card .grow { flex: 1; min-width: 0; }
+.avatar { width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center; font-size: 16px; line-height: 24px; font-weight: 600; }
+.name { font-size: 16px; line-height: 24px; font-weight: 600; }
+.code { position: relative; display: flex; gap: 8px; }
+.code .cell { flex: 1; height: 60px; border-radius: 14px; border: 1px solid var(--outline-variant); display: grid; place-items: center; font: 700 24px/32px ui-monospace, "Cascadia Mono", Consolas, monospace; transition: border-color .15s, background-color .15s; }
+.code .cell.filled { border-color: var(--primary); }
+.code .cell.active { border: 2px solid var(--primary); background: var(--sc-high); }
+.code input { position: absolute; inset: 0; width: 100%; opacity: 0; font-size: 16px; caret-color: transparent; }
+@container (max-width: 320px) { .code { gap: 4px; } .code .cell { height: 48px; font-size: 16px; } }
+.status { display: flex; justify-content: center; align-items: center; gap: 8px; min-height: 16px; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--primary); border-right-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-text { color: var(--error); font-size: 12px; line-height: 16px; }
+
+.appbar { height: 64px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 16px; position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.appbar h2 { flex: 1; margin: 0; font-size: 22px; line-height: 28px; font-weight: 600; }
+.card { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 28px; padding: 20px; }
+.code-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.code-big { font: 700 32px/40px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--primary); white-space: nowrap; }
+.section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.section-title { padding-left: 4px; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--primary); }
+.people { display: flex; gap: 16px; padding: 12px 16px; border-radius: 24px; background: var(--sc-lowest); overflow-x: auto; }
+.person { position: relative; width: 80px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; border: 0; background: none; border-radius: 16px; text-align: center; }
+.person:disabled { cursor: default; }
+.person .face { position: relative; width: 64px; height: 64px; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center; font-size: 24px; line-height: 32px; }
+.person.offline .face { background: var(--surface-variant); color: var(--on-surface-variant); }
+.person .pname { max-width: 80px; font-size: 16px; line-height: 24px; }
+.person .tag { font-size: 12px; line-height: 16px; font-weight: 500; }
+.person.offline .tag { font-size: 11px; color: var(--on-surface-variant); }
+.crown { position: absolute; right: -2px; bottom: -2px; width: 24px; height: 24px; border-radius: 50%; background: var(--sc-lowest); padding: 2px; }
+.crown span { width: 100%; height: 100%; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container); display: grid; place-items: center; }
+.pending { display: flex; gap: 2px; min-height: 68px; }
+.pending .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--sc-lowest); border-radius: 24px 4px 4px 24px; }
+.pending button { width: 56px; border: 0; display: grid; place-items: center; transition: filter .2s; }
+.pending button:hover { filter: brightness(1.1); }
+.pending .ok { background: var(--secondary-container); color: var(--on-secondary-container); border-radius: 4px; }
+.pending .no { background: var(--error-container); color: var(--on-error-container); border-radius: 4px 24px 24px 4px; }
+.np { display: flex; flex-direction: column; gap: 6px; }
+.np .t { font-size: 16px; line-height: 24px; font-weight: 800; }
+.bar { height: 6px; margin-top: 4px; border-radius: 3px; background: var(--outline-variant); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--primary); }
+.center { display: flex; justify-content: center; padding-top: 8px; }
+.settings-card { width: 100%; border: 0; text-align: left; }
+.settings-card:hover { background: var(--sc-high); }
+
+/* ---------- queue side pane ---------- */
+.queue { width: 360px; flex: none; margin-left: 12px; background: var(--surface); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
+.queue .appbar h2 { font-size: 22px; }
+.q-list { flex: 1; overflow: auto; padding: 0 8px 16px; }
+.q-label { padding: 12px 12px 4px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--primary); }
+.q-item { display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 12px; border-radius: 16px; }
+.q-item.current { background: var(--secondary-container); color: var(--on-secondary-container); }
+.q-item.current .muted { color: inherit; opacity: .8; }
+.thumb { width: 48px; height: 48px; flex: none; border-radius: 8px; overflow: hidden; background: var(--sc-highest); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb img:not([src]), .thumb img[src=""] { display: none; }
+.q-item .grow { flex: 1; min-width: 0; }
+.empty { padding: 24px 12px; text-align: center; color: var(--on-surface-variant); }
+
+/* ---------- mini video viewer (bottom-end of the content surface) ---------- */
+.mini { position: absolute; right: 16px; bottom: 16px; width: 356px; height: 200px; border-radius: 16px; overflow: hidden; background: #000; box-shadow: 0 6px 20px rgba(0,0,0,.35); z-index: 2; }
+.mini iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+/* ---------- bottom player ---------- */
+.player { grid-column: 1 / -1; background: var(--sc); transition: background-color .4s var(--ease); }
+.seek { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 4px; margin: 0; cursor: pointer;
+  background: linear-gradient(var(--primary), var(--primary)) 0 / var(--p, 0%) 100% no-repeat, var(--sc-highest); }
+.seek:disabled { cursor: default; }
+.seek::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 16px; border-radius: 2px; background: var(--primary); opacity: 0; transition: opacity .15s; }
+.seek::-moz-range-thumb { width: 4px; height: 16px; border: 0; border-radius: 2px; background: var(--primary); opacity: 0; }
+.player:hover .seek:enabled::-webkit-slider-thumb { opacity: 1; }
+.player:hover .seek:enabled::-moz-range-thumb { opacity: 1; }
+.pl-row { height: 72px; display: flex; align-items: center; gap: 16px; padding: 0 24px; }
+.pl-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.pl-info .t { font-size: 16px; line-height: 24px; font-weight: 600; }
+.pl-actions { flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.controls { display: flex; gap: 4px; height: 52px; }
+.controls button { border: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: border-radius .3s var(--ease), filter .2s; }
+.controls button:hover { filter: brightness(1.08); }
+.controls .side { width: 64px; border-radius: 26px; background: var(--sc-highest); color: var(--on-surface-variant); }
+.controls .side:disabled { opacity: .38; filter: none; cursor: default; }
+.controls .main-btn { min-width: 112px; padding: 0 20px; border-radius: 26px; background: var(--primary-container); color: var(--on-primary-container); font-weight: 600; }
+.controls .main-btn.playing { border-radius: 16px; }
+.controls .ms { font-size: 28px; }
+.compact-play { display: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--primary-container); color: var(--on-primary-container); place-items: center; }
+.compact-play .ms { font-size: 20px; }
+.vol { display: flex; align-items: center; gap: 4px; }
+.vol input { width: 96px; accent-color: var(--primary); }
+
+/* ---------- menu, dialog, snackbar ---------- */
+.menu { position: fixed; z-index: 20; min-width: 160px; padding: 8px 0; border-radius: 20px; background: var(--sc-low); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.menu .label { padding: 8px 12px; font-size: 14px; font-weight: 500; color: var(--on-surface-variant); }
+.menu button { width: 100%; height: 48px; padding: 0 12px; border: 0; background: none; display: flex; align-items: center; gap: 12px; text-align: left; }
+.menu button:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+dialog { width: min(560px, calc(100vw - 32px)); padding: 24px; border: 0; border-radius: 28px; background: var(--sc-high); color: var(--on-surface); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog h3 { margin: 0 0 16px; font-size: 24px; line-height: 32px; font-weight: 400; }
+dialog label { display: block; margin-bottom: 4px; font-size: 12px; line-height: 16px; color: var(--on-surface-variant); }
+dialog input { width: 100%; height: 56px; padding: 0 16px; border: 1px solid var(--outline); border-radius: 4px; background: transparent; font-size: 16px; outline: none; }
+dialog input:focus { border: 2px solid var(--primary); padding: 0 15px; }
+dialog .hint { margin-top: 4px; }
+dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.snack { position: fixed; left: 50%; bottom: 96px; z-index: 30; max-width: min(560px, calc(100vw - 32px)); padding: 14px 16px; border-radius: 8px;
+  background: var(--inverse-surface); color: var(--inverse-on-surface); box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  transform: translate(-50%, 16px); opacity: 0; pointer-events: none; transition: opacity .2s, transform .25s var(--ease); }
+.snack.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- compact window (phones) ---------- */
+@media (max-width: 600px) {
+  .rail { display: none; }
+  .topbar { padding-left: 8px; }
+  .suggest { left: 8px; right: 8px; width: auto; }
+  .panes-row { padding-left: 8px; }
+  .queue { position: fixed; inset: 8px 8px 84px; width: auto; margin: 0; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .mini { left: 16px; width: auto; }
+  .pl-row { padding: 0 16px; gap: 8px; }
+  .controls, .vol { display: none; }
+  .compact-play { display: grid; }
+  .pl-actions { flex: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-item"><span class="ind"><span class="ms fill">groups</span></span>Together</div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <form class="search" id="searchForm" role="search" autocomplete="off">
+        <span class="ms muted">search</span>
+        <input id="q" type="search" placeholder="Join or host a room to search" aria-label="Search songs and videos" enterkeyhint="search" disabled>
+        <button class="icon-btn" id="qClear" type="button" title="Clear" hidden><span class="ms">close</span></button>
+      </form>
+      <div class="suggest" id="suggest" hidden></div>
+    </header>
+
+    <div class="panes-row">
+      <section class="content" id="content">
+        <!-- create / join -->
+        <div class="scroll" id="lobby">
+          <div class="panes">
+            <div class="col">
+              <div class="hero">
+                <div style="flex:1">
+                  <h1>Listen&#10;Together</h1>
+                  <div class="muted">Listen to music with friends in real time.</div>
+                </div>
+                <div class="cookie" aria-hidden="true"><span class="ms">group</span></div>
+              </div>
+              <div class="seg" role="group" aria-label="Mode">
+                <button id="tabHost" type="button">Host</button>
+                <button id="tabJoin" type="button">Join</button>
+              </div>
+            </div>
+            <div class="col">
+              <div class="heading">
+                <h2 id="formTitle"></h2>
+                <div class="muted" id="formHint"></div>
+              </div>
+              <div>
+                <div class="row-card">
+                  <div class="avatar" id="meAvatar"></div>
+                  <div class="grow">
+                    <div class="name ellipsis" id="meName"></div>
+                    <div class="muted body-s">Username</div>
+                  </div>
+                  <button class="btn-o" id="editName" type="button"><span class="ms">edit</span>Edit</button>
+                </div>
+                <div class="error-text" id="nameError" hidden>Set a username first.</div>
+              </div>
+              <div class="code" id="codeBox">
+                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+                <input id="codeInput" maxlength="8" autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="Lobby code">
+              </div>
+              <button class="btn full" id="primaryAction" type="button"></button>
+              <div class="status muted body-s" id="lobbyStatus" aria-live="polite"></div>
+              <button class="btn-t" id="cancelJoin" type="button" hidden>Cancel</button>
+              <button class="row-card settings-card" id="openSettings" type="button">
+                <span class="ms muted">settings</span>
+                <span class="grow"><span class="name" style="font-weight:400;display:block">Settings</span><span class="muted body-s ellipsis" style="display:block" id="serverLabel"></span></span>
+                <span class="ms muted">chevron_right</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- in a room -->
+        <div class="scroll" id="room" hidden>
+          <div class="appbar">
+            <h2>Room</h2>
+            <button class="icon-btn" id="shareLink" type="button" title="Copy link"><span class="ms">share</span></button>
+          </div>
+          <div class="panes">
+            <div class="col">
+              <div class="card code-card" style="order:1">
+                <div class="muted body-s">Room code</div>
+                <div class="code-big" id="roomCode"></div>
+                <button class="btn-o" id="copyCode" type="button">Copy code</button>
+              </div>
+              <div class="card np" id="nowCard" style="order:3" hidden>
+                <div class="muted body-s">Now playing for everyone</div>
+                <div class="t ellipsis" id="npTitle"></div>
+                <div class="muted ellipsis" id="npArtist"></div>
+                <div class="bar"><i id="npBar"></i></div>
+              </div>
+              <div style="order:3;display:flex;flex-direction:column;gap:4px" id="upNextBox" hidden>
+                <div class="section-head">
+                  <div class="section-title">Up next</div>
+                  <button class="btn-o" id="openQueue" type="button">Queue</button>
+                </div>
+                <div id="upNext"></div>
+              </div>
+              <div class="center" style="order:4">
+                <button class="btn danger" id="leave" type="button"><span class="ms">logout</span><span id="leaveLabel">Leave</span></button>
+              </div>
+            </div>
+            <div class="col">
+              <div style="order:2;display:flex;flex-direction:column;gap:6px">
+                <div class="section-head">
+                  <div class="section-title">Participants</div>
+                  <div class="muted body-s" id="connLabel" aria-live="polite"></div>
+                </div>
+                <div class="people" id="people"></div>
+              </div>
+              <div style="order:2;display:flex;flex-direction:column;gap:4px" id="pendingBox" hidden>
+                <div class="section-title" style="margin-bottom:2px">Pending users</div>
+                <div id="pendingList" style="display:flex;flex-direction:column;gap:4px"></div>
+              </div>
+              <div style="order:2;display:flex;flex-direction:column;gap:4px" id="suggBox" hidden>
+                <div class="section-title" style="margin-bottom:2px">Pending suggestions</div>
+                <div id="suggList" style="display:flex;flex-direction:column;gap:4px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- search results -->
+        <div class="scroll" id="results" hidden>
+          <div class="appbar">
+            <button class="icon-btn" id="backFromSearch" type="button" title="Back"><span class="ms">arrow_back</span></button>
+            <h2 class="ellipsis" id="resultsTitle"></h2>
+          </div>
+          <div class="chips" role="group" aria-label="Filter">
+            <button type="button" data-type="songs"><span class="ms">check</span>Songs</button>
+            <button type="button" data-type="videos"><span class="ms">check</span>Videos</button>
+          </div>
+          <div class="grp results" id="resultList"></div>
+        </div>
+
+        <div class="mini" id="mini" hidden><div id="yt"></div></div>
+      </section>
+
+      <aside class="queue" id="queuePane" hidden aria-label="Queue">
+        <div class="appbar">
+          <h2>Queue</h2>
+          <button class="icon-btn" id="closeQueue" type="button" title="Close"><span class="ms">close</span></button>
+        </div>
+        <div class="q-list" id="qList"></div>
+      </aside>
+    </div>
+  </div>
+
+  <footer class="player">
+    <input class="seek" id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek" disabled>
+    <div class="pl-row">
+      <div class="pl-info">
+        <div class="thumb"><img id="plArt" alt=""></div>
+        <div style="min-width:0">
+          <div class="t ellipsis" id="plTitle">Not playing</div>
+          <div class="muted ellipsis" id="plArtist"></div>
+        </div>
+      </div>
+      <div class="controls" id="controls" hidden>
+        <button class="side" id="prevBtn" type="button" title="Previous"><span class="ms fill">skip_previous</span></button>
+        <button class="main-btn" id="playBtn" type="button"><span class="ms fill" id="playIcon">play_arrow</span><span id="playLabel">Play</span></button>
+        <button class="side" id="nextBtn" type="button" title="Next"><span class="ms fill">skip_next</span></button>
+      </div>
+      <div class="pl-actions">
+        <button class="compact-play" id="compactPlay" type="button" hidden><span class="ms fill" id="compactIcon">play_arrow</span></button>
+        <div class="vol">
+          <button class="icon-btn" id="muteBtn" type="button" title="Mute"><span class="ms" id="volIcon">volume_up</span></button>
+          <input id="vol" type="range" min="0" max="100" value="100" aria-label="Volume">
+        </div>
+        <button class="icon-btn" id="queueBtn" type="button" title="Queue"><span class="ms">queue_music</span></button>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<div class="menu" id="menu" hidden></div>
+<dialog id="dlg">
+  <form method="dialog">
+    <h3 id="dlgTitle"></h3>
+    <label for="dlgInput" id="dlgLabel"></label>
+    <input id="dlgInput" autocomplete="off">
+    <div class="muted body-s hint" id="dlgHint"></div>
+    <div class="actions">
+      <button class="btn-t" type="button" onclick="this.closest('dialog').close('cancel')">Cancel</button>
+      <button class="btn-t" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+<div class="snack" id="snack" role="status"></div>
+
+<script type="module">
+// Material 3 dynamic color, TonalSpot, seeded from the current artwork (desktop: MetrolistTheme + materialkolor).
+import { Hct, SchemeTonalSpot, MaterialDynamicColors as M, hexFromArgb, argbFromHex, QuantizerCelebi, Score }
+  from 'https://cdn.jsdelivr.net/npm/@material/material-color-utilities@0.3.0/+esm';
+const ROLES = {
+  'primary': 'primary', 'on-primary': 'onPrimary', 'primary-container': 'primaryContainer', 'on-primary-container': 'onPrimaryContainer',
+  'secondary-container': 'secondaryContainer', 'on-secondary-container': 'onSecondaryContainer',
+  'surface': 'surface', 'on-surface': 'onSurface', 'on-surface-variant': 'onSurfaceVariant', 'surface-variant': 'surfaceVariant',
+  'sc-lowest': 'surfaceContainerLowest', 'sc-low': 'surfaceContainerLow', 'sc': 'surfaceContainer', 'sc-high': 'surfaceContainerHigh',
+  'sc-highest': 'surfaceContainerHighest', 'outline': 'outline', 'outline-variant': 'outlineVariant',
+  'error': 'error', 'error-container': 'errorContainer', 'on-error-container': 'onErrorContainer',
+  'inverse-surface': 'inverseSurface', 'inverse-on-surface': 'inverseOnSurface',
+};
+const DEFAULT_SEED = argbFromHex('#6750A4');
+const dark = matchMedia('(prefers-color-scheme: dark)');
+let seed = DEFAULT_SEED;
+function apply() {
+  const scheme = new SchemeTonalSpot(Hct.fromInt(seed), dark.matches, 0);
+  for (const [name, role] of Object.entries(ROLES)) document.documentElement.style.setProperty('--' + name, hexFromArgb(M[role].getArgb(scheme)));
+}
+dark.addEventListener('change', apply);
+window.themeFromArtwork = async urls => {
+  try {
+    let img;
+    for (const url of urls) {          // album art first, video thumbnail as fallback
+      img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = url;
+      try { await img.decode(); break; } catch { img = null; }
+    }
+    if (!img) throw new Error('no artwork');
+    const c = Object.assign(document.createElement('canvas'), { width: 64, height: 64 });
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0, 64, 64);
+    const d = g.getImageData(0, 0, 64, 64).data, px = [];
+    for (let i = 0; i < d.length; i += 4) px.push(((255 << 24) | (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]) >>> 0);
+    seed = Score.score(QuantizerCelebi.quantize(px, 128))[0];
+  } catch { seed = DEFAULT_SEED; }
+  apply();
+};
+window.themeReset = () => { seed = DEFAULT_SEED; apply(); };
+apply();
+</script>
+
+<script>
+// Wire format from MetrolistGroup/metroproto (listentogether.proto), comments stripped.
+const PROTO = `syntax = "proto3"; package listentogether;
+message Envelope { string type = 1; bytes payload = 2; bool compressed = 3; uint64 request_id = 4; }
+message TrackInfo { string id = 1; string title = 2; string artist = 3; string album = 4; int64 duration = 5; string thumbnail = 6; string suggested_by = 7; }
+message UserInfo { string user_id = 1; string username = 2; bool is_host = 3; bool is_connected = 4; }
+message RoomState { string room_code = 1; string host_id = 2; repeated UserInfo users = 3; TrackInfo current_track = 4; bool is_playing = 5; int64 position = 6; int64 last_update = 7; float volume = 8; repeated TrackInfo queue = 9; uint64 revision = 10; string queue_title = 11; }
+message CreateRoomPayload { string username = 1; }
+message JoinRoomPayload { string room_code = 1; string username = 2; }
+message LeaveRoomPayload {}
+message ApproveJoinPayload { string user_id = 1; }
+message RejectJoinPayload { string user_id = 1; string reason = 2; }
+message KickUserPayload { string user_id = 1; string reason = 2; }
+message PlaybackActionPayload { string action = 1; string track_id = 2; int64 position = 3; TrackInfo track_info = 4; bool insert_next = 5; repeated TrackInfo queue = 6; string queue_title = 7; float volume = 8; int64 server_time = 9; uint64 revision = 10; int64 captured_at_server_time = 11; bool replace_queue = 12; string origin_user_id = 13; uint64 host_sequence = 14; }
+message PingPayload { int64 client_time = 1; uint64 sequence = 2; }
+message BufferReadyPayload { string track_id = 1; uint64 track_revision = 2; }
+message ReconnectPayload { string session_token = 1; }
+message RoomCreatedPayload { string room_code = 1; string user_id = 2; string session_token = 3; }
+message JoinRequestPayload { string user_id = 1; string username = 2; }
+message JoinApprovedPayload { string room_code = 1; string user_id = 2; string session_token = 3; RoomState state = 4; }
+message JoinRejectedPayload { string reason = 1; }
+message UserJoinedPayload { string user_id = 1; string username = 2; }
+message BufferWaitPayload { string track_id = 1; repeated string waiting_for = 2; }
+message BufferCompletePayload { string track_id = 1; }
+message ErrorPayload { string code = 1; string message = 2; }
+message HostChangedPayload { string new_host_id = 1; string new_host_name = 2; }
+message KickedPayload { string reason = 1; }
+message SyncStatePayload { TrackInfo current_track = 1; bool is_playing = 2; int64 position = 3; int64 last_update = 4; repeated TrackInfo queue = 5; float volume = 6; uint64 revision = 7; string queue_title = 8; }
+message PongPayload { int64 client_time = 1; int64 server_receive_time = 2; int64 server_send_time = 3; uint64 sequence = 4; }
+message ReconnectedPayload { string room_code = 1; string user_id = 2; RoomState state = 3; bool is_host = 4; }
+message ClientCapabilities { bool supports_protobuf = 1; bool supports_compression = 2; string client_version = 3; repeated string features = 4; }
+message ServerCapabilities { bool supports_protobuf = 1; bool supports_compression = 2; string server_version = 3; repeated string features = 4; bool can_host = 5; }
+message ServerRestartingPayload { int64 eta_ms = 1; string reason = 2; }
+message SuggestTrackPayload { TrackInfo track_info = 1; }
+message ApproveSuggestionPayload { string suggestion_id = 1; }
+message RejectSuggestionPayload { string suggestion_id = 1; string reason = 2; }
+message SuggestionReceivedPayload { string suggestion_id = 1; string from_user_id = 2; string from_username = 3; TrackInfo track_info = 4; }
+message SuggestionApprovedPayload { string suggestion_id = 1; TrackInfo track_info = 2; }
+message SuggestionRejectedPayload { string suggestion_id = 1; string reason = 2; }`;
+
+const root = protobuf.parse(PROTO, { keepCase: true }).root;
+const Envelope = root.lookupType('listentogether.Envelope');
+// Envelope type -> payload message. Types not listed carry no payload we use.
+const TYPES = {
+  client_capabilities: 'ClientCapabilities', create_room: 'CreateRoomPayload', join_room: 'JoinRoomPayload',
+  leave_room: 'LeaveRoomPayload', approve_join: 'ApproveJoinPayload', reject_join: 'RejectJoinPayload', kick_user: 'KickUserPayload',
+  playback_action: 'PlaybackActionPayload', buffer_ready: 'BufferReadyPayload', ping: 'PingPayload', reconnect: 'ReconnectPayload',
+  server_capabilities: 'ServerCapabilities', room_created: 'RoomCreatedPayload', join_request: 'JoinRequestPayload',
+  join_approved: 'JoinApprovedPayload', join_rejected: 'JoinRejectedPayload', user_joined: 'UserJoinedPayload',
+  user_left: 'UserJoinedPayload', user_reconnected: 'UserJoinedPayload', user_disconnected: 'UserJoinedPayload',
+  sync_playback: 'PlaybackActionPayload', buffer_wait: 'BufferWaitPayload', buffer_complete: 'BufferCompletePayload',
+  error: 'ErrorPayload', pong: 'PongPayload', host_changed: 'HostChangedPayload', kicked: 'KickedPayload',
+  sync_state: 'SyncStatePayload', reconnected: 'ReconnectedPayload', server_restarting: 'ServerRestartingPayload',
+  suggest_track: 'SuggestTrackPayload', approve_suggestion: 'ApproveSuggestionPayload', reject_suggestion: 'RejectSuggestionPayload',
+  suggestion_received: 'SuggestionReceivedPayload', suggestion_approved: 'SuggestionApprovedPayload', suggestion_rejected: 'SuggestionRejectedPayload',
+};
+const msgType = t => TYPES[t] && root.lookupType('listentogether.' + TYPES[t]);
+const ROOM_CODE_LENGTH = 8;
+
+// ---- small DOM helpers (textContent only: names/titles come from other users) ----
+const $ = id => document.getElementById(id);
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el[k] = v;
+    else el.setAttribute(k, v);
+  }
+  el.append(...kids.flat().filter(k => k != null && k !== false));
+  return el;
+}
+const icon = (name, cls = '') => h('span', { class: `ms ${cls}`, 'aria-hidden': 'true', text: name });
+const initial = s => (s || '').trim().charAt(0).toUpperCase();
+const safeImg = url => /^https:\/\//.test(url || '') ? url : '';
+// Album art (googleusercontent) can be refused (e.g. HTTP 429 bot checks); fall back to the video thumbnail.
+const ytThumb = id => /^[\w-]{11}$/.test(id || '') ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : '';
+function art(t, cls = '') {
+  const src = safeImg(t?.thumbnail) || ytThumb(t?.id);
+  const img = src ? h('img', { src, alt: '', loading: 'lazy' }) : null;
+  if (img) img.onerror = () => { img.onerror = null; img.src = ytThumb(t.id); };
+  return h('div', { class: 'thumb ' + cls }, img);
+}
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+let snackTimer;
+function snack(msg) {
+  const s = $('snack');
+  s.textContent = msg;
+  s.classList.add('show');
+  clearTimeout(snackTimer);
+  snackTimer = setTimeout(() => s.classList.remove('show'), 3500);
+}
+function copy(text, what) {
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => snack(`${what} copied`));
+  else prompt(`Copy the ${what.toLowerCase()}:`, text);   // clipboard API needs https/localhost
+}
+
+// ---- state ----
+const params = new URLSearchParams(location.search);
+let username = store.get('lt-name') || '';
+// On GitHub Pages the page is static; search and rooms come from server.js on the host PC via its ngrok address.
+// (ngrok's free-plan warning page only hits plain page loads: the header below skips it for API calls, and WebSockets pass.)
+const BACKEND = location.hostname.endsWith('github.io') ? 'https://motion-tidal-june.ngrok-free.dev' : '';
+const API_HEADERS = BACKEND ? { 'ngrok-skip-browser-warning': '1' } : {};
+let serverUrl = params.get('server') || store.get('lt-server') ||
+  (BACKEND ? BACKEND.replace(/^http/, 'ws') : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || 'localhost:5500'}`) + '/ws'; // server.js proxies /ws to metroserver
+let joinMode = !!params.get('room');
+let codeValue = (params.get('room') || '').replace(/[^a-z0-9]/gi, '').slice(0, ROOM_CODE_LENGTH).toUpperCase();
+let conn = 'idle';                    // idle | connecting | connected | reconnecting | error
+let joinPending = false;
+let ws, leaving = false, pingSeq = 0, hostSeq = 0, clockOffset = null;
+let me = {};                          // { id, token }
+const room = { code: '', hostId: '', users: new Map(), queue: [], pending: new Map(), suggestions: new Map() };
+let track = null;                     // TrackInfo currently loaded
+let anchor = null;                    // { pos ms, at server ms, playing } — the room timeline
+let player, playerReady = false, applyingRemote = false, hostAutoplay = false;
+
+const serverNow = () => Date.now() + (clockOffset ?? 0);
+const isHost = () => !!me.id && me.id === room.hostId;
+const expectedPos = () => !anchor ? 0 : anchor.playing ? anchor.pos + (serverNow() - anchor.at) : anchor.pos;
+
+// ---- transport ----
+function send(type, payload = {}) {
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  const T = msgType(type);
+  const bytes = T ? T.encode(T.fromObject(payload)).finish() : new Uint8Array();
+  ws.send(Envelope.encode({ type, payload: bytes }).finish());
+}
+
+async function decodeFrame(buf) {
+  const env = Envelope.decode(new Uint8Array(buf));
+  let bytes = env.payload;
+  if (env.compressed) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  const T = msgType(env.type);
+  return [env.type, T ? T.toObject(T.decode(bytes), { longs: Number, defaults: true, arrays: true }) : {}];
+}
+
+function connect(afterOpen) {
+  leaving = false;
+  conn = me.token ? 'reconnecting' : 'connecting';
+  renderStatus();
+  try { ws = new WebSocket(serverUrl); } catch { conn = 'error'; joinPending = false; renderLobby(); return; }
+  ws.binaryType = 'arraybuffer';
+  let chain = Promise.resolve();   // decode is async (gzip); keep messages in order
+  ws.onmessage = e => { chain = chain.then(() => decodeFrame(e.data)).then(([t, p]) => handle(t, p)).catch(err => console.warn('bad frame', err)); };
+  ws.onopen = () => {
+    conn = 'connected';
+    send('client_capabilities', { supports_protobuf: true, supports_compression: true, client_version: 'listen-web/0.2', features: ['origin_tag'] });
+    ping();
+    afterOpen();
+    renderStatus();
+  };
+  ws.onclose = () => {
+    if (leaving) return;
+    if (!me.token) { conn = 'error'; joinPending = false; renderLobby(); return; }
+    conn = 'reconnecting';
+    renderStatus();
+    setTimeout(() => connect(() => send('reconnect', { session_token: me.token })), 2000);
+  };
+}
+
+function ping() { send('ping', { client_time: Date.now(), sequence: ++pingSeq }); }
+setInterval(ping, 5000);
+
+// ---- server messages ----
+function handle(type, p) {
+  switch (type) {
+    case 'room_created':
+      me = { id: p.user_id, token: p.session_token };
+      enterRoom(p.room_code, { host_id: p.user_id, users: [{ user_id: p.user_id, username, is_connected: true }] });
+      break;
+    case 'join_approved': me = { id: p.user_id, token: p.session_token }; enterRoom(p.room_code, p.state); break;
+    case 'reconnected': me.id = p.user_id; enterRoom(p.room_code, p.state); break;
+    case 'join_rejected':
+      snack('The host declined your request' + (p.reason ? `: ${p.reason}` : ''));
+      leaving = true; ws.close(); conn = 'idle'; joinPending = false; renderLobby();
+      break;
+    case 'join_request': room.pending.set(p.user_id, p.username); renderPeople(); break;
+    case 'user_joined': case 'user_reconnected':
+      room.pending.delete(p.user_id);
+      room.users.set(p.user_id, { name: p.username, online: true }); renderPeople(); break;
+    case 'user_disconnected': { const u = room.users.get(p.user_id); if (u) u.online = false; renderPeople(); break; }
+    case 'user_left': room.users.delete(p.user_id); room.pending.delete(p.user_id); renderPeople(); break;
+    case 'host_changed': room.hostId = p.new_host_id; snack(`${p.new_host_name} is now the host`); renderRoom(); break;
+    case 'kicked': snack('You were removed from the room'); leave(); break;
+    case 'sync_playback': onSync(p); break;
+    case 'sync_state': applyState(p); break;
+    case 'pong': {
+      const now = Date.now();
+      const offset = ((p.server_receive_time - p.client_time) + (p.server_send_time - now)) / 2;
+      clockOffset = clockOffset === null ? offset : clockOffset * 0.8 + offset * 0.2;
+      break;
+    }
+    case 'server_restarting': snack('Server restarting — reconnecting shortly'); break;
+    case 'suggestion_received':
+      room.suggestions.set(p.suggestion_id, { from: p.from_username, track: p.track_info });
+      snack(`${p.from_username} suggested “${p.track_info?.title}”`);
+      renderPeople();
+      break;
+    case 'suggestion_approved': snack(`“${p.track_info?.title}” was added to the queue`); break;
+    case 'suggestion_rejected': snack('The host declined your suggestion'); break;
+    case 'error':
+      snack(p.message || p.code);
+      starting = false;   // a rejected change_track must not block the next auto-start
+      if (!room.code) { joinPending = false; renderLobby(); }
+      break;
+  }
+}
+
+function enterRoom(code, s) {
+  joinPending = false;
+  room.code = code;
+  room.hostId = s.host_id;
+  room.users = new Map((s.users || []).map(u => [u.user_id, { name: u.username, online: u.is_connected }]));
+  try { sessionStorage.setItem('lt', JSON.stringify({ server: serverUrl, token: me.token })); } catch {}
+  history.replaceState(null, '', '?room=' + encodeURIComponent(code));
+  if ($('results').hidden) showView('room');
+  renderRoom();
+  applyState(s);
+}
+
+function applyState(s) {
+  room.queue = s.queue || [];
+  renderQueue();
+  if (s.current_track?.id) loadTrack(s.current_track, { pos: s.position, at: s.last_update, playing: s.is_playing });
+}
+
+function onSync(p) {
+  const own = p.origin_user_id && p.origin_user_id === me.id;
+  if (p.queue && ['change_track', 'queue_add', 'queue_remove', 'queue_clear', 'sync_queue'].includes(p.action)) {
+    room.queue = p.queue; renderQueue();
+    if (p.action !== 'change_track') startQueueIfIdle();   // e.g. host approved a suggestion while nothing was playing
+  }
+  switch (p.action) {
+    case 'change_track': loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false }); break;
+    case 'play':  anchor = { pos: p.position, at: p.server_time, playing: true };  if (!own) applyAnchor(); break;
+    case 'pause': anchor = { pos: p.position, at: p.server_time, playing: false }; if (!own) applyAnchor(); break;
+    case 'seek':  anchor = { pos: p.position, at: p.server_time, playing: anchor?.playing ?? false }; if (!own) applyAnchor(); break;
+  }
+  renderPlayState();
+}
+
+// ---- playback (YouTube IFrame player in the mini viewer) ----
+function loadTrack(t, anc) {
+  const changed = track?.id !== t.id;
+  track = t; anchor = anc; stalled = starting = false;
+  renderTrack(changed);
+  if (!playerReady) return;            // onReady picks it up
+  if (changed || player.getVideoData()?.video_id !== t.id) {
+    applyingRemote = true;
+    player.cueVideoById(t.id);         // -> CUED -> trackCued()
+  } else trackCued();
+}
+
+function trackCued() {
+  applyAnchor();
+  send('buffer_ready', { track_id: track.id });
+  if (isHost() && hostAutoplay) { hostAutoplay = false; player.playVideo(); hostAction('play'); }
+}
+
+function applyAnchor() {
+  if (!playerReady || !anchor || !track) return;
+  applyingRemote = true;
+  player.seekTo(expectedPos() / 1000, true);
+  anchor.playing ? player.playVideo() : player.pauseVideo();
+  setTimeout(() => { applyingRemote = false; }, 1000);
+}
+
+function hostAction(action, extra = {}) {
+  if (!isHost() || !track) return;
+  const pos = Math.round(player.getCurrentTime() * 1000);
+  hostSeq = Math.max(hostSeq + 1, Date.now());   // survives page reloads: server rejects non-increasing values
+  send('playback_action', { action, track_id: track.id, position: pos, captured_at_server_time: Math.round(serverNow()), host_sequence: hostSeq, ...extra });
+  anchor = { pos, at: serverNow(), playing: action === 'play' ? true : action === 'pause' ? false : !!anchor?.playing };
+  renderPlayState();
+}
+
+function onStateChange({ data: st }) {
+  if (st === YT.PlayerState.CUED && track) { applyingRemote = false; trackCued(); return; }
+  if (!isHost() || applyingRemote) return;
+  if (st === YT.PlayerState.PLAYING && !anchor?.playing) hostAction('play');
+  else if (st === YT.PlayerState.PAUSED && anchor?.playing) hostAction('pause');
+  else if (st === YT.PlayerState.ENDED) { stalled = true; skipNext(); }
+}
+
+// Host: detect scrubbing in the YouTube controls. Guests: pull back to the room timeline.
+setInterval(() => {
+  if (!playerReady || !track || !anchor || applyingRemote) return;
+  const st = player.getPlayerState();
+  const drift = Math.abs(player.getCurrentTime() * 1000 - expectedPos());
+  if (isHost()) {
+    if (st !== YT.PlayerState.PLAYING && st !== YT.PlayerState.PAUSED) return;
+    const playing = st === YT.PlayerState.PLAYING;
+    if (playing !== anchor.playing) hostAction(playing ? 'play' : 'pause');   // missed state event
+    else if (drift > 2000) hostAction('seek');
+    return;
+  }
+  const playing = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
+  if (drift > 1500 || playing !== anchor.playing) applyAnchor();
+  if (anchor.playing && (st === YT.PlayerState.UNSTARTED || st === YT.PlayerState.CUED)) snack('Your browser blocked autoplay — press play on the video once.');
+}, 2000);
+
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player('yt', {
+    playerVars: { playsinline: 1, rel: 0 },
+    events: {
+      onReady: () => {
+        playerReady = true;
+        player.setVolume(+$('vol').value);
+        if (track) loadTrack(track, anchor);
+      },
+      onStateChange,
+      onError: e => {
+        const blocked = [101, 150].includes(e.data);
+        snack(blocked ? `YouTube won't play “${track?.title}” in this player${isHost() && room.queue.length ? ' — skipping' : ''}` : `YouTube error ${e.data}`);
+        if (blocked && isHost()) { stalled = true; skipNext(); }   // otherwise the room stalls on a track nobody can hear
+      },
+    },
+  });
+};
+
+// ---- host: adding tracks ----
+const parseId = s => (s.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([\w-]{11})/) || s.match(/^([\w-]{11})$/) || [])[1];
+
+async function trackFromInput(input) {
+  const id = parseId(input.trim());
+  if (!id) { snack('No video ID found in that link'); return null; }
+  const info = { id, title: id, artist: '', thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` };
+  try {
+    const r = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/watch?v=' + id)}`);
+    if (r.ok) { const m = await r.json(); info.title = m.title; info.artist = (m.author_name || '').replace(/ - Topic$/, ''); }
+  } catch {}
+  return info;
+}
+
+// Host: nothing playing (never started, or last track ended/was blocked) -> play the head of the queue.
+let stalled = false, starting = false;
+function startQueueIfIdle() { if (isHost() && !starting && room.queue.length && (!track || stalled)) skipNext(); }
+
+function changeTrack(info) {
+  hostAutoplay = true; starting = true;
+  hostSeq = Math.max(hostSeq + 1, Date.now());
+  send('playback_action', { action: 'change_track', track_id: info.id, track_info: info, host_sequence: hostSeq });
+}
+function skipNext() { if (room.queue.length) changeTrack(room.queue[0]); }
+
+// Host plays a pick right away; a guest suggests it to the host (server inserts it next on approval).
+function pickTrack(t) {
+  closeSuggest();
+  if (isHost()) changeTrack(t);
+  else { send('suggest_track', { track_info: t }); snack(`Suggested “${t.title}” to the host`); }
+}
+function queueTrack(t) {
+  if (!track) return changeTrack(t);
+  send('playback_action', { action: 'queue_add', track_info: t });
+  snack(`Added “${t.title}” to the queue`);
+}
+
+// ---- search: YouTube Music through server.js, like the desktop app ----
+const isLink = s => /(?:youtube\.com|youtu\.be)\//i.test(s);
+const fmtTime = ms => ms ? `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}` : '';
+const search = { query: '', type: 'songs', items: [], state: 'idle' };   // state: idle | loading | done | error
+let suggestTimer, suggestAbort, resultsAbort;
+
+function trackRow(t, { kind = 'Song', small = false } = {}) {
+  const host = isHost();
+  const sub = [kind, t.artist, t.album, fmtTime(t.duration)].filter(Boolean).join(' • ');
+  return h('div', { class: 'item', role: 'button', tabindex: '0', title: host ? 'Play now' : 'Suggest to the host',
+      onclick: () => pickTrack(t), onkeydown: e => { if (e.key === 'Enter') pickTrack(t); } },
+    art(t, kind === 'Video' ? 'wide' : small ? 'sm' : ''),
+    h('div', { class: 'grow' }, h('div', { class: 'item-t ellipsis', text: t.title }), h('div', { class: 'muted ellipsis', text: sub })),
+    host
+      ? h('button', { class: 'icon-btn', type: 'button', title: 'Add to queue', onclick: e => { e.stopPropagation(); queueTrack(t); } }, icon('playlist_add'))
+      : h('button', { class: 'icon-btn', type: 'button', title: 'Suggest to the host', onclick: e => { e.stopPropagation(); pickTrack(t); } }, icon('add')));
+}
+
+function closeSuggest() { $('suggest').hidden = true; suggestAbort?.abort(); clearTimeout(suggestTimer); }
+
+async function loadSuggest(q) {
+  suggestAbort?.abort();
+  suggestAbort = new AbortController();
+  try {
+    const r = await fetch(BACKEND + '/api/suggest?q=' + encodeURIComponent(q), { signal: suggestAbort.signal, headers: API_HEADERS });
+    if (!r.ok) return;
+    const { queries, items } = await r.json();
+    const panel = [];
+    if (queries.length) panel.push(h('h3', { text: 'Suggestions' }), h('div', { class: 'grp' }, queries.map(s =>
+      h('div', { class: 'item', role: 'button', tabindex: '0', onclick: () => runSearch(s), onkeydown: e => { if (e.key === 'Enter') runSearch(s); } },
+        icon('search', 'muted'), h('div', { class: 'grow ellipsis', text: s }),
+        h('button', { class: 'icon-btn', type: 'button', title: 'Edit this search', onclick: e => { e.stopPropagation(); $('q').value = s + ' '; $('q').focus(); loadSuggest(s); } }, icon('north_west'))))));
+    if (items.length) panel.push(h('h3', { text: 'Recommended' }), h('div', { class: 'grp' }, items.map(t => trackRow(t, { kind: t.kind || 'Song', small: true }))));
+    $('suggest').replaceChildren(...panel);
+    $('suggest').hidden = !panel.length || document.activeElement !== $('q');
+  } catch {}
+}
+
+$('q').oninput = () => {
+  const v = $('q').value.trim();
+  $('qClear').hidden = !v;
+  clearTimeout(suggestTimer);
+  if (!v || isLink(v)) return closeSuggest();
+  suggestTimer = setTimeout(() => loadSuggest(v), 150);
+};
+$('q').onfocus = () => { if ($('suggest').childElementCount && $('q').value.trim()) $('suggest').hidden = false; };
+$('q').onkeydown = e => { if (e.key === 'Escape') closeSuggest(); };
+$('qClear').onclick = () => { $('q').value = ''; $('qClear').hidden = true; closeSuggest(); $('q').focus(); };
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#suggest, #searchForm')) closeSuggest(); });
+
+$('searchForm').onsubmit = async e => {
+  e.preventDefault();
+  const v = $('q').value.trim();
+  if (!v) return;
+  if (isLink(v)) {                      // pasted links still work
+    const info = await trackFromInput(v);
+    if (info) { $('q').value = ''; pickTrack(info); }
+    return;
+  }
+  runSearch(v);
+};
+
+function runSearch(q) {
+  closeSuggest();
+  $('q').value = q;
+  $('q').blur();
+  search.query = q;
+  showView('results');
+  loadResults();
+}
+
+async function loadResults() {
+  resultsAbort?.abort();
+  resultsAbort = new AbortController();
+  search.state = 'loading';
+  renderResults();
+  try {
+    const r = await fetch(`${BACKEND}/api/search?type=${search.type}&q=${encodeURIComponent(search.query)}`, { signal: resultsAbort.signal, headers: API_HEADERS });
+    if (!r.ok) throw new Error();
+    search.items = await r.json();
+    search.state = 'done';
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    search.state = 'error';
+  }
+  renderResults();
+}
+
+function renderResults() {
+  $('resultsTitle').textContent = search.query;
+  document.querySelectorAll('.chips button').forEach(b => b.setAttribute('aria-pressed', b.dataset.type === search.type));
+  const list = $('resultList');
+  if (search.state === 'loading') return list.replaceChildren(...Array.from({ length: 8 }, () => h('div', { class: 'skel' })));
+  if (search.state === 'error') return list.replaceChildren(h('div', { class: 'empty' },
+    h('div', { text: 'Search is unavailable right now.' }), h('button', { class: 'btn-t', type: 'button', onclick: loadResults, text: 'Retry' })));
+  if (!search.items.length) return list.replaceChildren(h('div', { class: 'empty', text: 'No results' }));
+  list.replaceChildren(...search.items.map(t => trackRow(t, { kind: search.type === 'videos' ? 'Video' : 'Song' })));
+}
+
+document.querySelectorAll('.chips button').forEach(b => { b.onclick = () => { if (search.type !== b.dataset.type) { search.type = b.dataset.type; loadResults(); } }; });
+$('backFromSearch').onclick = () => showView('room');
+
+function showView(name) {
+  $('lobby').hidden = name !== 'lobby';
+  $('room').hidden = name !== 'room';
+  $('results').hidden = name !== 'results';
+}
+
+// ---- player bar ----
+$('playBtn').onclick = $('compactPlay').onclick = () => {
+  if (!isHost() || !playerReady || !track) return;
+  anchor?.playing ? player.pauseVideo() : player.playVideo();
+};
+$('prevBtn').onclick = () => { if (isHost() && playerReady) { player.seekTo(0, true); hostAction('seek'); } };
+$('nextBtn').onclick = skipNext;
+$('seek').oninput = e => e.target.style.setProperty('--p', e.target.value / 10 + '%');
+$('seek').onchange = e => {
+  if (!isHost() || !playerReady) return;
+  player.seekTo(player.getDuration() * e.target.value / 1000, true);
+  hostAction('seek');
+};
+let lastVol = 100;
+$('vol').value = store.get('lt-vol') ?? 100;
+$('vol').oninput = e => { playerReady && player.setVolume(+e.target.value); store.set('lt-vol', e.target.value); renderVolIcon(); };
+$('muteBtn').onclick = () => {
+  const v = $('vol');
+  if (+v.value) { lastVol = +v.value; v.value = 0; } else v.value = lastVol || 100;
+  v.dispatchEvent(new Event('input'));
+};
+function renderVolIcon() { const v = +$('vol').value; $('volIcon').textContent = v === 0 ? 'volume_off' : v < 50 ? 'volume_down' : 'volume_up'; }
+$('queueBtn').onclick = () => { $('queuePane').hidden = !$('queuePane').hidden; };
+$('closeQueue').onclick = () => { $('queuePane').hidden = true; };
+$('openQueue').onclick = () => { $('queuePane').hidden = false; };
+
+// Progress for the bottom bar and the now-playing card.
+setInterval(() => {
+  if (!playerReady || !track) return;
+  const dur = player.getDuration() || 0;
+  const frac = dur ? Math.min(1, player.getCurrentTime() / dur) : 0;
+  const seek = $('seek');
+  if (document.activeElement !== seek) { seek.value = Math.round(frac * 1000); seek.style.setProperty('--p', frac * 100 + '%'); }
+  $('npBar').style.width = frac * 100 + '%';
+}, 250);
+
+// ---- rendering ----
+function renderLobby() {
+  $('tabHost').setAttribute('aria-pressed', !joinMode);
+  $('tabJoin').setAttribute('aria-pressed', joinMode);
+  $('formTitle').textContent = joinMode ? 'Enter the room code' : 'Host a room';
+  $('formHint').textContent = joinMode ? 'Ask your friend for the 8-character code.' : 'Start a session and share the code. Friends hear what you play, live.';
+  $('codeBox').hidden = !joinMode;
+  $('primaryAction').textContent = joinMode ? 'Join room' : 'Create a room';
+  const busy = conn === 'connecting' || joinPending;
+  $('primaryAction').disabled = busy || (joinMode && codeValue.length !== ROOM_CODE_LENGTH);
+  $('meName').textContent = username || 'Not set';
+  $('meAvatar').textContent = initial(username);
+  $('serverLabel').textContent = 'Server: ' + serverUrl;
+  $('cancelJoin').hidden = !joinPending;
+  renderCode();
+  renderStatus();
+}
+
+function renderCode() {
+  const focused = document.activeElement === $('codeInput');
+  [...$('codeBox').querySelectorAll('.cell')].forEach((cell, i) => {
+    cell.textContent = codeValue[i] || '';
+    cell.classList.toggle('filled', i < codeValue.length);
+    cell.classList.toggle('active', focused && i === Math.min(codeValue.length, ROOM_CODE_LENGTH - 1));
+  });
+}
+
+const CONN_TEXT = { connecting: 'Connecting…', reconnecting: 'Reconnecting…', error: 'Connection error', connected: 'Connected', idle: 'Disconnected' };
+function renderStatus() {
+  const s = $('lobbyStatus');
+  const text = conn === 'connecting' ? CONN_TEXT.connecting
+    : conn === 'error' ? CONN_TEXT.error
+    : joinPending && joinMode ? 'Waiting for the host to approve your request…'
+    : joinPending ? 'Connecting…' : '';
+  s.replaceChildren(...(joinPending || conn === 'connecting' ? [h('span', { class: 'spinner' })] : []), text);
+  $('connLabel').textContent = CONN_TEXT[conn];
+}
+
+function renderRoom() {
+  $('roomCode').textContent = room.code.match(/.{1,4}/g)?.join(' ') || '';
+  $('leaveLabel').textContent = isHost() ? 'End session' : 'Leave';
+  const host = isHost();
+  $('q').disabled = false;
+  $('q').placeholder = host ? 'Search songs and videos' : 'Search to suggest a song to the host';
+  if (!$('results').hidden) renderResults();   // row actions differ for host and guests
+  $('controls').hidden = $('compactPlay').hidden = !host;
+  $('seek').disabled = !host;
+  renderPeople();
+  renderQueue();
+  renderPlayState();
+}
+
+function renderPeople() {
+  const host = isHost();
+  $('people').replaceChildren(...[...room.users].map(([id, u]) => {
+    const isRoomHost = id === room.hostId, self = id === me.id;
+    const btn = h('button', { class: 'person' + (u.online ? '' : ' offline'), type: 'button', title: u.name },
+      h('div', { class: 'face' }, initial(u.name),
+        isRoomHost && h('div', { class: 'crown' }, h('span', {},
+          svgCrown()))),
+      h('div', { class: 'pname ellipsis', text: u.name + (self ? ' (you)' : '') }),
+      isRoomHost && u.online ? h('div', { class: 'tag', text: 'Host' }) : !u.online ? h('div', { class: 'tag', text: 'Disconnected' }) : null);
+    btn.disabled = !(host && !self);
+    btn.onclick = () => openMenu(btn, u.name, [['logout', 'Kick', () => send('kick_user', { user_id: id })]]);
+    return btn;
+  }));
+  $('pendingBox').hidden = !(host && room.pending.size);
+  $('pendingList').replaceChildren(...[...room.pending].map(([id, name]) => h('div', { class: 'pending' },
+    h('div', { class: 'who' }, h('div', { class: 'avatar', text: initial(name) }), h('div', { class: 'name ellipsis', style: 'font-weight:600', text: name })),
+    h('button', { class: 'ok', type: 'button', title: 'Approve', onclick: () => { send('approve_join', { user_id: id }); room.pending.delete(id); renderPeople(); } }, icon('check')),
+    h('button', { class: 'no', type: 'button', title: 'Reject', onclick: () => { send('reject_join', { user_id: id }); room.pending.delete(id); renderPeople(); } }, icon('close')))));
+  $('suggBox').hidden = !(host && room.suggestions.size);
+  $('suggList').replaceChildren(...[...room.suggestions].map(([id, s]) => {
+    const done = () => { room.suggestions.delete(id); renderPeople(); };
+    return h('div', { class: 'pending' },
+      h('div', { class: 'who' }, art(s.track, 'sm'),
+        h('div', { style: 'min-width:0' }, h('div', { class: 'name ellipsis', text: s.track?.title || '' }), h('div', { class: 'muted body-s ellipsis', text: `${s.track?.artist || ''} · from ${s.from}` }))),
+      h('button', { class: 'ok', type: 'button', title: 'Approve', onclick: () => { send('approve_suggestion', { suggestion_id: id }); done(); } }, icon('check')),
+      h('button', { class: 'no', type: 'button', title: 'Reject', onclick: () => { send('reject_suggestion', { suggestion_id: id }); done(); } }, icon('close')));
+  }));
+}
+
+function svgCrown() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 11 11'); svg.setAttribute('width', '11'); svg.setAttribute('height', '11');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M0 9.9V2.2L3.08 5.5 5.5 0 7.92 5.5 11 2.2V9.9Z'); path.setAttribute('fill', 'currentColor');
+  svg.append(path);
+  return svg;
+}
+
+function renderTrack(changed) {
+  const t = track;
+  $('plTitle').textContent = t?.title || 'Not playing';
+  $('plArtist').textContent = t?.artist || '';
+  const pl = $('plArt');
+  pl.onerror = () => { pl.onerror = null; pl.src = ytThumb(t?.id); };
+  pl.src = safeImg(t?.thumbnail) || ytThumb(t?.id);
+  $('nowCard').hidden = !t;
+  $('npTitle').textContent = t?.title || '';
+  $('npArtist').textContent = t?.artist || '';
+  $('mini').hidden = !t;
+  $('content').classList.toggle('has-video', !!t);
+  if (changed) t ? window.themeFromArtwork?.([safeImg(t.thumbnail), ytThumb(t.id)].filter(Boolean)) : window.themeReset?.();
+  renderQueue();
+}
+
+function renderPlayState() {
+  const playing = !!anchor?.playing;
+  $('playIcon').textContent = $('compactIcon').textContent = playing ? 'pause' : 'play_arrow';
+  $('playLabel').textContent = playing ? 'Pause' : 'Play';
+  $('playBtn').classList.toggle('playing', playing);
+  $('nextBtn').disabled = !room.queue.length;
+}
+
+function queueRow(t, current) {
+  const host = isHost();
+  return h('div', { class: 'q-item' + (current ? ' current' : '') },
+    art(t),
+    h('div', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:500', text: t.title }), h('div', { class: 'muted ellipsis body-s', text: t.artist || '' })),
+    !current && host ? h('button', { class: 'icon-btn', type: 'button', title: 'Remove', onclick: () => send('playback_action', { action: 'queue_remove', track_id: t.id }) }, icon('close')) : null);
+}
+
+function renderQueue() {
+  const rows = [];
+  if (track) rows.push(h('div', { class: 'q-label', text: 'Now playing' }), queueRow(track, true));
+  rows.push(h('div', { class: 'q-label', text: 'Up next' }));
+  rows.push(...(room.queue.length ? room.queue.map(t => queueRow(t, false)) : [h('div', { class: 'empty', text: 'Nothing queued' })]));
+  $('qList').replaceChildren(...rows);
+  $('upNext').replaceChildren(...room.queue.map(t => queueRow(t, false)));
+  $('upNextBox').hidden = !room.queue.length;
+  $('nextBtn').disabled = !room.queue.length;
+}
+
+// ---- menu + dialog ----
+function openMenu(anchorEl, title, items) {
+  const m = $('menu');
+  m.replaceChildren(h('div', { class: 'label ellipsis', text: title }),
+    ...items.map(([ic, label, fn]) => h('button', { type: 'button', onclick: () => { m.hidden = true; fn(); } }, icon(ic), label)));
+  m.hidden = false;
+  const r = anchorEl.getBoundingClientRect();
+  m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 8) + 'px';
+  m.style.top = Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8) + 'px';
+}
+document.addEventListener('pointerdown', e => { if (!$('menu').contains(e.target) && !e.target.closest('.person')) $('menu').hidden = true; });
+
+function askText({ title, label, value, hint = '' }) {
+  return new Promise(resolve => {
+    const d = $('dlg');
+    $('dlgTitle').textContent = title;
+    $('dlgLabel').textContent = label;
+    $('dlgHint').textContent = hint;
+    $('dlgInput').value = value;
+    d.returnValue = '';
+    d.onclose = () => resolve(d.returnValue === 'ok' ? $('dlgInput').value.trim() : null);
+    d.showModal();
+    $('dlgInput').select();
+  });
+}
+
+// ---- lobby actions ----
+$('tabHost').onclick = () => { joinMode = false; renderLobby(); };
+$('tabJoin').onclick = () => { joinMode = true; renderLobby(); $('codeInput').focus(); };
+$('codeInput').value = codeValue;
+$('codeInput').oninput = e => {
+  codeValue = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, ROOM_CODE_LENGTH).toUpperCase();
+  e.target.value = codeValue;
+  renderLobby();
+};
+$('codeInput').onfocus = $('codeInput').onblur = renderCode;
+$('codeInput').onkeydown = e => { if (e.key === 'Enter' && !$('primaryAction').disabled) $('primaryAction').click(); };
+
+async function editName() {
+  const v = await askText({ title: 'Username', label: 'Username', value: username });
+  if (v === null) return false;
+  username = v.slice(0, 32);
+  store.set('lt-name', username);
+  $('nameError').hidden = !!username;
+  renderLobby();
+  return !!username;
+}
+$('editName').onclick = editName;
+
+$('primaryAction').onclick = async () => {
+  if (!username && !(await editName())) { $('nameError').hidden = false; return; }
+  joinPending = true;
+  renderLobby();
+  if (joinMode) connect(() => send('join_room', { room_code: codeValue, username }));
+  else connect(() => send('create_room', { username }));
+};
+$('cancelJoin').onclick = () => { leaving = true; ws?.close(); joinPending = false; conn = 'idle'; renderLobby(); };
+
+$('openSettings').onclick = async () => {
+  const v = await askText({ title: 'Listen Together server', label: 'Server URL', value: serverUrl, hint: 'ws:// or wss:// address of a metroserver, ending in /ws' });
+  if (!v) return;
+  if (!/^wss?:\/\//i.test(v)) { snack('The server address must start with ws:// or wss://'); return; }
+  serverUrl = v;
+  store.set('lt-server', v);
+  renderLobby();
+};
+
+// ---- room actions ----
+$('copyCode').onclick = () => copy(room.code, 'Code');
+$('shareLink').onclick = () => copy(location.href, 'Link');
+
+function leave() {
+  leaving = true;
+  send('leave_room');
+  ws?.close();
+  try { sessionStorage.removeItem('lt'); } catch {}
+  location.href = location.pathname;
+}
+$('leave').onclick = leave;
+
+// ---- layout: two panes on wide or landscape content, like the desktop screen ----
+new ResizeObserver(([e]) => {
+  const { width: w, height: hgt } = e.contentRect;
+  $('content').classList.toggle('two', w >= 840 || (w >= 480 && w > hgt));
+}).observe($('content'));
+
+// Cookie9Sided-style shape for the hero icon.
+document.documentElement.style.setProperty('--cookie', 'polygon(' + Array.from({ length: 108 }, (_, i) => {
+  const t = (i / 108) * 2 * Math.PI - Math.PI / 2, r = 46 + 4 * Math.cos(9 * (t + Math.PI / 2));
+  return `${(50 + r * Math.cos(t)).toFixed(2)}% ${(50 + r * Math.sin(t)).toFixed(2)}%`;
+}).join(',') + ')');
+
+// ---- boot ----
+renderLobby();
+renderVolIcon();
+try {
+  const saved = JSON.parse(sessionStorage.getItem('lt') || 'null');
+  if (saved?.token) { serverUrl = saved.server; me.token = saved.token; connect(() => send('reconnect', { session_token: saved.token })); }
+} catch {}
+
+const yt = document.createElement('script');
+yt.src = 'https://www.youtube.com/iframe_api';
+document.head.append(yt);
+</script>
+</body>
+</html>

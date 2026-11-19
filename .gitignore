@@ -1,0 +1,4 @@
+# Only the page is published (GitHub Pages); server.js and start.cmd stay local.
+*
+!index.html
+!.gitignore
