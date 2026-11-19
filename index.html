@@ -733,6 +733,8 @@ function handle(type, p) {
     case 'suggestion_approved': snack(`“${p.track_info?.title}” was added to the queue`); break;
     case 'suggestion_rejected': snack('The host declined your suggestion'); break;
     case 'error':
+      // Server restarted (redeploy / free host slept) and forgot the room: don't sit in a dead room.
+      if (me.token && ['session_not_found', 'session_expired', 'not_in_room'].includes(p.code)) { roomGone(); break; }
       snack(p.message || p.code);
       starting = false;   // a rejected change_track must not block the next auto-start
       if (!room.code) { joinPending = false; renderLobby(); }
@@ -1386,6 +1388,13 @@ function leave() {
 }
 $('leave').onclick = leave;
 
+function roomGone() {
+  leaving = true;
+  ws?.close();
+  try { sessionStorage.removeItem('lt'); sessionStorage.setItem('lt-ended', '1'); } catch {}
+  location.href = location.pathname;
+}
+
 // ---- layout: two panes on wide or landscape content, like the desktop screen ----
 new ResizeObserver(([e]) => {
   const { width: w, height: hgt } = e.contentRect;
@@ -1404,6 +1413,10 @@ renderVolIcon();
 try {
   const saved = JSON.parse(sessionStorage.getItem('lt') || 'null');
   if (saved?.token) { serverUrl = saved.server; me.token = saved.token; connect(() => send('reconnect', { session_token: saved.token })); }
+  if (sessionStorage.getItem('lt-ended')) {
+    sessionStorage.removeItem('lt-ended');
+    snack('That room has ended because the server restarted. Start or join a new one.');
+  }
 } catch {}
 
 const yt = document.createElement('script');
