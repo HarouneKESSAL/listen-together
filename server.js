@@ -94,8 +94,9 @@ async function search(q, type) {
 
 // Songs like this one, for endless radio. YouTube Music's own radio ('next' + RDAMVM playlist) when the
 // host network allows it; otherwise (cloud IPs get refused) the artist's top songs.
+let radioRefusedUntil = 0;   // after a refusal, skip straight to the fallback for a while (each refusal costs seconds)
 async function radio(id, artist) {
-  try {
+  if (Date.now() > radioRefusedUntil) try {
     const res = await innertube('next', { videoId: id, playlistId: 'RDAMVM' + id, isAudioOnly: true, enablePersistentPlaylistPanel: true });
     const panel = [];
     (function walk(n) {
@@ -114,7 +115,8 @@ async function radio(id, artist) {
       };
     });
     if (tracks.length) return { source: 'radio', tracks };
-  } catch (err) { console.error('radio:', err.message); }
+    radioRefusedUntil = Date.now() + 3600_000;
+  } catch (err) { console.error('radio:', err.message); radioRefusedUntil = Date.now() + 3600_000; }
   const main = artist.split(/,| & | x | feat\.? /i)[0].trim();
   const found = main ? (await search(main, 'songs')).filter(t => t.id !== id) : [];
   // A name search also matches titles ("Queen" -> "Queen Of The Zoo" by someone else); prefer the artist's own songs.
