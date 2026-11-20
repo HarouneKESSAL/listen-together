@@ -772,7 +772,14 @@ function handle(type, p) {
       room.users.set(p.user_id, { name: p.username, online: true }); renderPeople(); break;
     case 'user_disconnected': { const u = room.users.get(p.user_id); if (u) u.online = false; renderPeople(); break; }
     case 'user_left': room.users.delete(p.user_id); room.pending.delete(p.user_id); renderPeople(); break;
-    case 'host_changed': room.hostId = p.new_host_id; snack(`${p.new_host_name} is now the host`); renderRoom(); break;
+    case 'host_changed': {
+      const wasHost = isHost();
+      room.hostId = p.new_host_id;
+      if (wasHost && !isHost()) try { localStorage.removeItem('lt-last'); } catch {}   // the new host's device keeps the music now
+      snack(`${p.new_host_name} is now the host`);
+      renderRoom();
+      break;
+    }
     case 'kicked': snack('You were removed from the room'); leave(); break;
     case 'sync_playback': onSync(p); break;
     case 'sync_state': applyState(p); break;
@@ -794,7 +801,6 @@ function handle(type, p) {
       // Server restarted (redeploy / free host slept) and forgot the room: don't sit in a dead room.
       if (me.token && ['session_not_found', 'session_expired', 'not_in_room'].includes(p.code)) { roomGone(); break; }
       snack(p.message || p.code);
-      starting = false;   // a rejected change_track must not block the next auto-start
       if (!room.code) { joinPending = false; renderLobby(); }
       break;
   }
@@ -837,7 +843,7 @@ function onSync(p) {
 // ---- playback (YouTube IFrame player in the mini viewer) ----
 function loadTrack(t, anc) {
   const changed = track?.id !== t.id;
-  track = t; anchor = anc; stalled = starting = false;
+  track = t; anchor = anc; stalled = false; startedAt = 0;
   if (changed) remember(t);
   renderTrack(changed);
   if (!playerReady) return;            // onReady picks it up
@@ -955,12 +961,15 @@ $('radioToggle').onchange = e => {
 };
 
 // Host: nothing playing (never started, or last track ended/was blocked) -> play the head of the queue.
-let stalled = false, starting = false;
-function startQueueIfIdle() { if (isHost() && !starting && room.queue.length && (!track || stalled)) skipNext(); }
+// startedAt: when we last asked for a song change. Blocks a second auto-start until the room confirms it
+// (loadTrack resets it), or for 5 s if the server never does (rejected / lost message).
+let stalled = false, startedAt = 0;
+const starting = () => Date.now() - startedAt < 5000;
+function startQueueIfIdle() { if (isHost() && !starting() && room.queue.length && (!track || stalled)) skipNext(); }
 
 // extra: { queue, replace_queue, queue_title } replaces the upcoming queue in the same step.
 function changeTrack(info, extra = {}) {
-  hostAutoplay = true; starting = true;
+  hostAutoplay = true; startedAt = Date.now();
   hostSeq = Math.max(hostSeq + 1, Date.now());
   send('playback_action', { action: 'change_track', track_id: info.id, track_info: info, host_sequence: hostSeq, ...extra });
 }
@@ -1101,6 +1110,7 @@ async function playCollection(c, append = false) {
   if (append && track) {
     const have = new Set([track.id, ...room.queue.map(t => t.id)]);
     const add = tracks.filter(t => !have.has(t.id));
+    if (!add.length) return snack(`Everything from “${c.title}” is already queued`);
     send('playback_action', { action: 'sync_queue', queue: [...room.queue, ...add], queue_title: room.queueTitle || c.title });
     snack(`Added ${add.length} songs from “${c.title}” to the queue`);
   } else {
@@ -1234,7 +1244,9 @@ function renderRoom() {
   $('radioRow').hidden = !host;
   if (host) maybeRadio();   // e.g. just became host with an empty queue
   $('seek').disabled = !host;
-  if (lyrics) renderLyrics();   // tap-to-seek is host-only
+  // Tap-to-seek on lyrics is host-only; toggle it without rebuilding (keeps the scroll position).
+  $('lyrics').classList.toggle('can-seek', host);
+  $('lyricsNote').textContent = lyrics?.plain ? 'Not synced' : lyrics?.synced && host ? 'Tap a line to jump there' : '';
   renderPeople();
   renderQueue();
   renderPlayState();
