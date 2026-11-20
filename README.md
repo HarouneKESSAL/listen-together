@@ -16,7 +16,9 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
    - **Albums** and **Playlists** filters: the host plays a whole album/playlist or adds all of it to the queue.
 4. **Lyrics** scroll in time with the song for everyone (from [LRCLIB](https://lrclib.net)). The host can tap a line to jump there.
 5. **Queue:** tap an upcoming song to play it now (the rest stays queued); *Recently played* lets you replay or re-suggest songs.
-6. **Hand over control:** the host can tap a participant and choose **Make host**.
+6. **Endless radio** (host, on by default in the queue panel): when the last queued song starts, similar songs are queued so the music keeps going.
+7. **Invite:** the share button opens your phone's share menu; **QR code** under the room code lets people in the same room scan to join.
+8. **Hand over control:** the host can tap a participant and choose **Make host**.
 
 **Install it as an app:** on Android (Chrome) or a computer, tap **Install app** on the start screen. On iPhone/iPad, open the link in Safari, tap Share, then **Add to Home Screen**.
 
@@ -37,6 +39,8 @@ Metrolist app users can join the same rooms by setting a custom Listen Together 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HarouneKESSAL/listen-together)
 
 The `Dockerfile` bundles metroserver and `server.js` into one container; `render.yaml` deploys it on Render's free plan. Everything (page, search, rooms) is served from the one `onrender.com` address, and pushes to `main` redeploy automatically.
+
+To keep it awake, point a free uptime monitor (e.g. UptimeRobot, every 5 minutes) at `https://<your-service>.onrender.com/health`. It returns 503 if the room server is down, so the monitor also emails you about outages.
 
 Free-plan limits: the service sleeps after about 15 minutes with no traffic. The next visitor wakes it, which takes up to a minute, and rooms that were open when it went to sleep are gone.
 

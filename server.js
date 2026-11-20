@@ -92,6 +92,33 @@ async function search(q, type) {
   return (type === 'albums' || type === 'playlists' ? rows.map(toCollection) : rows.map(toTrack)).filter(Boolean);
 }
 
+// Songs like this one, for endless radio. YouTube Music's own radio ('next' + RDAMVM playlist) when the
+// host network allows it; otherwise (cloud IPs get refused) the artist's top songs.
+async function radio(id, artist) {
+  try {
+    const res = await innertube('next', { videoId: id, playlistId: 'RDAMVM' + id, isAudioOnly: true, enablePersistentPlaylistPanel: true });
+    const panel = [];
+    (function walk(n) {
+      if (Array.isArray(n)) n.forEach(walk);
+      else if (n && typeof n === 'object') n.playlistPanelVideoRenderer ? panel.push(n.playlistPanelVideoRenderer) : Object.values(n).forEach(walk);
+    })(res);
+    const tracks = panel.filter(v => v.videoId && v.videoId !== id).map(v => {
+      const len = v.lengthText?.runs?.[0]?.text || '';
+      return {
+        id: v.videoId,
+        title: (v.title?.runs || []).map(r => r.text).join(''),
+        artist: (v.longBylineText?.runs || []).map(r => r.text).join('').split(' • ')[0] || '',
+        album: '',
+        duration: /^\d+(:\d{2}){1,2}$/.test(len) ? len.split(':').reduce((a, n) => a * 60 + +n, 0) * 1000 : 0,
+        thumbnail: bigArt(v.thumbnail?.thumbnails?.at(-1)?.url) || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+      };
+    });
+    if (tracks.length) return { source: 'radio', tracks };
+  } catch (err) { console.error('radio:', err.message); }
+  const main = artist.split(/,| & | x | feat\.? /i)[0].trim();
+  return { source: 'artist', tracks: main ? (await search(main, 'songs')).filter(t => t.id !== id) : [] };
+}
+
 // Tracks of an album or playlist from its page. ('browse', like search, works from cloud hosts; 'next' gets refused there.)
 // Limitation: first page only (~100 tracks); follow continuations if longer playlists matter.
 async function collection(playlistId) {
@@ -133,6 +160,22 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/search') {
       const type = Object.hasOwn(FILTERS, url.searchParams.get('type')) ? url.searchParams.get('type') : 'songs';
       return json(res, 200, q ? await search(q, type) : []);
+    }
+    // For uptime pingers (keeps the free host awake) and the host's health check: 503 if rooms are down.
+    if (url.pathname === '/health') {
+      const ok = await new Promise(done => {
+        const s = net.connect(+WS_PORT, WS_HOST, () => { s.destroy(); done(true); });
+        s.setTimeout(2000, () => { s.destroy(); done(false); });
+        s.on('error', () => done(false));
+      });
+      return json(res, ok ? 200 : 503, { ok });
+    }
+    if (url.pathname === '/api/radio') {
+      const id = url.searchParams.get('id') || '';
+      if (!/^[\w-]{11}$/.test(id)) return json(res, 400, { error: 'Bad video id' });
+      const { source, tracks } = await radio(id, (url.searchParams.get('artist') || '').slice(0, 200));
+      res.setHeader('x-radio-source', source);
+      return json(res, 200, tracks);
     }
     if (url.pathname === '/api/collection') {
       const id = url.searchParams.get('id') || '';

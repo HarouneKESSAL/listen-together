@@ -171,6 +171,11 @@ button { cursor: pointer; }
 .card { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 28px; padding: 20px; }
 .code-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .code-big { font: 700 32px/40px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--primary); white-space: nowrap; }
+.code-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.qr-dlg { width: min(360px, calc(100vw - 32px)); text-align: center; }
+.qr-box { display: grid; place-items: center; margin: 0 auto 12px; width: 256px; height: 256px; max-width: 100%; border-radius: 16px; background: #fff; }
+.qr-box img { width: 240px; height: 240px; max-width: 94%; height: auto; image-rendering: pixelated; }
+.qr-dlg .code-big { font-size: 24px; line-height: 32px; }
 .section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .section-title { padding-left: 4px; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--primary); }
 .people { display: flex; gap: 16px; padding: 12px 16px; border-radius: 24px; background: var(--sc-lowest); overflow-x: auto; }
@@ -204,6 +209,8 @@ button { cursor: pointer; }
 .q-label { padding: 12px 12px 4px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--primary); }
 .q-item { display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 12px; border-radius: 16px; }
 .q-item.current { background: var(--secondary-container); color: var(--on-secondary-container); }
+.radio-row { display: flex; align-items: center; gap: 12px; margin: 0 8px 4px; padding: 10px 12px; border-radius: 16px; background: var(--sc-high); cursor: pointer; }
+.radio-row input { width: 20px; height: 20px; accent-color: var(--primary); flex: none; }
 .q-item.clickable { cursor: pointer; }
 .q-item.clickable:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
 .q-item.current .muted { color: inherit; opacity: .8; }
@@ -369,7 +376,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
               <div class="card code-card" style="order:1">
                 <div class="muted body-s">Room code</div>
                 <div class="code-big" id="roomCode"></div>
-                <button class="btn-o" id="copyCode" type="button">Copy code</button>
+                <div class="code-actions">
+                  <button class="btn-o" id="copyCode" type="button">Copy code</button>
+                  <button class="btn-o" id="showQr" type="button"><span class="ms">qr_code_2</span>QR code</button>
+                </div>
               </div>
               <div class="card np" id="nowCard" style="order:3" hidden>
                 <div class="muted body-s">Now playing for everyone</div>
@@ -438,6 +448,11 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
           <h2>Queue</h2>
           <button class="icon-btn" id="closeQueue" type="button" title="Close"><span class="ms">close</span></button>
         </div>
+        <label class="radio-row" id="radioRow" hidden>
+          <span class="ms muted">radio</span>
+          <span class="grow"><span style="display:block;font-weight:500">Endless radio</span><span class="muted body-s" style="display:block">When the queue runs out, keep playing similar songs</span></span>
+          <input type="checkbox" id="radioToggle">
+        </label>
         <div class="q-list" id="qList"></div>
       </aside>
     </div>
@@ -482,6 +497,16 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
       <button class="btn-t" value="ok">Save</button>
     </div>
   </form>
+</dialog>
+<dialog id="qrDlg" class="qr-dlg">
+  <h3>Scan to join</h3>
+  <div class="qr-box"><img id="qrImg" alt="QR code for the room link" width="240" height="240"></div>
+  <div class="code-big" id="qrCode"></div>
+  <div class="muted body-s ellipsis" id="qrLink"></div>
+  <div class="actions">
+    <button class="btn-t" type="button" id="qrShare">Share link</button>
+    <button class="btn-t" type="button" onclick="this.closest('dialog').close()">Close</button>
+  </div>
 </dialog>
 <div class="snack" id="snack" role="status"></div>
 
@@ -782,7 +807,7 @@ function onSync(p) {
     if (p.action !== 'change_track') startQueueIfIdle();   // e.g. host approved a suggestion while nothing was playing
   }
   switch (p.action) {
-    case 'change_track': loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false }); break;
+    case 'change_track': loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false }); maybeRadio(); break;
     case 'play':  anchor = { pos: p.position, at: p.server_time, playing: true };  if (!own) applyAnchor(); break;
     case 'pause': anchor = { pos: p.position, at: p.server_time, playing: false }; if (!own) applyAnchor(); break;
     case 'seek':  anchor = { pos: p.position, at: p.server_time, playing: anchor?.playing ?? false }; if (!own) applyAnchor(); break;
@@ -883,6 +908,27 @@ async function trackFromInput(input) {
   } catch {}
   return info;
 }
+
+// ---- endless radio (host): when the last queued song starts, queue up similar ones ----
+let radioOn = store.get('lt-radio') !== 'off', radioBusy = false, radioSeed = '';
+async function maybeRadio() {
+  if (!isHost() || !radioOn || radioBusy || room.queue.length || !track || radioSeed === track.id) return;
+  radioBusy = true; radioSeed = track.id;
+  const seed = track;
+  try {
+    const r = await fetch(`${BACKEND}/api/radio?id=${encodeURIComponent(seed.id)}&artist=${encodeURIComponent(seed.artist || '')}`);
+    const skip = new Set([seed.id, ...played.map(p => p.id)]);   // don't loop back over what we just heard
+    const next = (r.ok ? await r.json() : []).filter(t => !skip.has(t.id)).slice(0, 10);
+    if (next.length && isHost() && radioOn && !room.queue.length)
+      send('playback_action', { action: 'sync_queue', queue: next, queue_title: `Radio · ${seed.title}` });   // startQueueIfIdle picks it up if playback already stopped
+  } catch {} finally { radioBusy = false; }
+}
+$('radioToggle').checked = radioOn;
+$('radioToggle').onchange = e => {
+  radioOn = e.target.checked;
+  store.set('lt-radio', radioOn ? 'on' : 'off');
+  if (radioOn) { radioSeed = ''; maybeRadio(); }
+};
 
 // Host: nothing playing (never started, or last track ended/was blocked) -> play the head of the queue.
 let stalled = false, starting = false;
@@ -1132,6 +1178,8 @@ function renderRoom() {
   $('q').placeholder = host ? 'Search songs and videos' : 'Search to suggest a song to the host';
   if (!$('results').hidden) renderResults();   // row actions differ for host and guests
   $('controls').hidden = $('compactPlay').hidden = !host;
+  $('radioRow').hidden = !host;
+  if (host) maybeRadio();   // e.g. just became host with an empty queue
   $('seek').disabled = !host;
   if (lyrics) renderLyrics();   // tap-to-seek is host-only
   renderPeople();
@@ -1391,7 +1439,35 @@ $('openSettings').onclick = async () => {
 
 // ---- room actions ----
 $('copyCode').onclick = () => copy(room.code, 'Code');
-$('shareLink').onclick = () => copy(location.href, 'Link');
+// Share the room link: the phone's share menu where there is one, else copy.
+const roomLink = () => location.origin + location.pathname + '?room=' + encodeURIComponent(room.code);
+async function shareRoom() {
+  if (navigator.share) {
+    try { return await navigator.share({ title: 'Listen Together', text: `Join my Listen Together room (code ${room.code})`, url: roomLink() }); }
+    catch (e) { if (e.name === 'AbortError') return; }   // user closed the share sheet
+  }
+  copy(roomLink(), 'Link');
+}
+$('shareLink').onclick = $('qrShare').onclick = shareRoom;
+
+// QR code of the room link. The generator (qrcode-generator, ~20 KB) loads only when first needed.
+let qrLib;
+const loadQrLib = () => qrLib ??= new Promise((ok, fail) => {
+  const s = h('script', { src: 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js' });
+  s.onload = () => ok(window.qrcode); s.onerror = () => { qrLib = null; fail(); };
+  document.head.append(s);
+});
+$('showQr').onclick = async () => {
+  let qrcode;
+  try { qrcode = await loadQrLib(); } catch { return snack("Couldn't load the QR code. Check your connection."); }
+  const qr = qrcode(0, 'M');
+  qr.addData(roomLink());
+  qr.make();
+  $('qrImg').src = qr.createDataURL(8, 2);
+  $('qrCode').textContent = room.code.match(/.{1,4}/g)?.join(' ') || '';
+  $('qrLink').textContent = roomLink();
+  $('qrDlg').showModal();
+};
 
 function leave() {
   leaving = true;
