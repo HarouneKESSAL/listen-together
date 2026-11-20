@@ -171,6 +171,9 @@ button { cursor: pointer; }
 .card { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 28px; padding: 20px; }
 .code-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .code-big { font: 700 32px/40px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--primary); white-space: nowrap; }
+.resume-card { display: flex; flex-direction: column; gap: 12px; background: var(--secondary-container); color: var(--on-secondary-container); }
+.resume-card .muted { color: inherit; opacity: .8; }
+.resume-top { display: flex; align-items: center; gap: 12px; }
 .code-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .qr-dlg { width: min(360px, calc(100vw - 32px)); text-align: center; }
 .qr-box { display: grid; place-items: center; margin: 0 auto 12px; width: 256px; height: 256px; max-width: 100%; border-radius: 16px; background: #fff; }
@@ -333,6 +336,18 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
               <div class="heading">
                 <h2 id="formTitle"></h2>
                 <div class="muted" id="formHint"></div>
+              </div>
+              <div class="card resume-card" id="resumeCard" hidden>
+                <div class="resume-top">
+                  <div id="resumeArt"></div>
+                  <div class="grow" style="min-width:0">
+                    <div class="muted body-s">Pick up where you left off</div>
+                    <div class="ellipsis" style="font-weight:600" id="resumeTitle"></div>
+                    <div class="muted body-s ellipsis" id="resumeSub"></div>
+                  </div>
+                  <button class="icon-btn" id="resumeDismiss" type="button" title="Forget this"><span class="ms">close</span></button>
+                </div>
+                <button class="btn full" id="resumeGo" type="button"><span class="ms">replay</span>Start a room with this music</button>
               </div>
               <div>
                 <div class="row-card">
@@ -742,6 +757,7 @@ function handle(type, p) {
     case 'room_created':
       me = { id: p.user_id, token: p.session_token };
       enterRoom(p.room_code, { host_id: p.user_id, users: [{ user_id: p.user_id, username, is_connected: true }] });
+      resumeMusic();
       break;
     case 'join_approved': me = { id: p.user_id, token: p.session_token }; enterRoom(p.room_code, p.state); break;
     case 'reconnected': me.id = p.user_id; enterRoom(p.room_code, p.state); break;
@@ -833,7 +849,12 @@ function loadTrack(t, anc) {
 function trackCued() {
   applyAnchor();
   send('buffer_ready', { track_id: track.id });
-  if (isHost() && hostAutoplay) { hostAutoplay = false; player.playVideo(); hostAction('play'); }
+  if (isHost() && hostAutoplay) {
+    hostAutoplay = false;
+    if (resumeAt) { player.seekTo(resumeAt / 1000, true); resumeAt = 0; }   // carrying on from a lost room
+    player.playVideo();
+    hostAction('play');
+  }
 }
 
 function applyAnchor() {
@@ -1174,6 +1195,7 @@ function renderLobby() {
   $('meAvatar').textContent = initial(username);
   $('serverLabel').textContent = 'Server: ' + serverUrl;
   $('cancelJoin').hidden = !joinPending;
+  renderResume();
   renderCode();
   renderStatus();
 }
@@ -1450,6 +1472,7 @@ async function editName() {
 $('editName').onclick = editName;
 
 $('primaryAction').onclick = async () => {
+  pendingResume = null;   // a plain new room starts empty
   if (!username && !(await editName())) { $('nameError').hidden = false; return; }
   joinPending = true;
   renderLobby();
@@ -1500,6 +1523,7 @@ $('showQr').onclick = async () => {
 };
 
 function leave() {
+  if (isHost()) try { localStorage.removeItem('lt-last'); } catch {}   // ended on purpose: nothing to carry on
   leaving = true;
   send('leave_room');
   ws?.close();
@@ -1513,6 +1537,46 @@ function roomGone() {
   ws?.close();
   try { sessionStorage.removeItem('lt'); sessionStorage.setItem('lt-ended', '1'); } catch {}
   location.href = location.pathname;
+}
+
+// ---- carry on after a lost room ----
+// Rooms live only in server memory, so a restart (redeploy) ends them. While hosting, keep a snapshot of
+// the music on this device; the start screen then offers a new room that picks up the same song and queue.
+const RESUME_MAX_AGE = 12 * 3600_000;
+let pendingResume = null, resumeAt = 0;
+const readResume = () => {
+  try { const s = JSON.parse(store.get('lt-last')); return s?.track?.id && Date.now() - s.savedAt < RESUME_MAX_AGE ? s : null; }
+  catch { return null; }
+};
+setInterval(() => {
+  if (!isHost() || !track || !room.code) return;
+  store.set('lt-last', JSON.stringify({ track, pos: Math.round(expectedPos()), queue: room.queue.slice(0, 200), queueTitle: room.queueTitle, savedAt: Date.now() }));
+}, 5000);
+
+function renderResume() {
+  const s = readResume();
+  $('resumeCard').hidden = !s || joinMode || joinPending;
+  if (!s) return;
+  $('resumeArt').replaceChildren(art(s.track));
+  $('resumeTitle').textContent = s.track.title;
+  $('resumeSub').textContent = [s.track.artist, s.queue.length ? `${s.queue.length} more queued` : ''].filter(Boolean).join(' · ');
+}
+$('resumeDismiss').onclick = () => { try { localStorage.removeItem('lt-last'); } catch {} renderResume(); };
+$('resumeGo').onclick = async () => {
+  pendingResume = readResume();
+  if (!pendingResume) return renderResume();
+  if (!username && !(await editName())) { pendingResume = null; $('nameError').hidden = false; return; }
+  joinPending = true;
+  renderLobby();
+  connect(() => send('create_room', { username }));
+};
+// Called once the new room exists.
+function resumeMusic() {
+  const s = pendingResume;
+  pendingResume = null;
+  if (!s) return;
+  resumeAt = s.pos || 0;
+  changeTrack(s.track, { queue: s.queue || [], replace_queue: true, queue_title: s.queueTitle || '' });
 }
 
 // ---- layout: two panes on wide or landscape content, like the desktop screen ----
@@ -1556,7 +1620,9 @@ try {
   if (saved?.token) { serverUrl = saved.server; me.token = saved.token; connect(() => send('reconnect', { session_token: saved.token })); }
   if (sessionStorage.getItem('lt-ended')) {
     sessionStorage.removeItem('lt-ended');
-    snack('That room has ended because the server restarted. Start or join a new one.');
+    snack(readResume()
+      ? 'That room ended because the server restarted. Tap “Start a room with this music” to carry on.'
+      : 'That room has ended because the server restarted. Start or join a new one.');
   }
 } catch {}
 
