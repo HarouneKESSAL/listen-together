@@ -6,6 +6,11 @@ import { readFile } from 'node:fs/promises';
 
 const PORT = Number(process.env.PORT) || 5500;
 const PAGE = new URL('./index.html', import.meta.url);
+// App-install files next to the page (fixed list: nothing else on disk is reachable).
+const STATIC = {
+  '/manifest.webmanifest': 'application/manifest+json', '/sw.js': 'text/javascript; charset=utf-8',
+  '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/apple-touch-icon.png': 'image/png',
+};
 const CLIENT = { clientName: 'WEB_REMIX', clientVersion: '1.20260707.12.00', hl: 'en', gl: 'US' };
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
 const FILTERS = {
@@ -119,6 +124,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/' || url.pathname === '/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
       return res.end(await readFile(PAGE));
+    }
+    if (Object.hasOwn(STATIC, url.pathname)) {
+      res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': 'no-cache' });
+      return res.end(await readFile(new URL('.' + url.pathname, import.meta.url)));
     }
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
     if (url.pathname === '/api/search') {

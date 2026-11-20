@@ -7,3 +7,6 @@
 !README.md
 !Dockerfile
 !render.yaml
+!manifest.webmanifest
+!sw.js
+!*.png

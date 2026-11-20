@@ -16,7 +16,7 @@ RUN bash scripts/generate_proto.sh \
 FROM node:22-alpine
 WORKDIR /app
 COPY --from=metroserver /build/metroserver ./
-COPY index.html server.js ./
+COPY index.html server.js manifest.webmanifest sw.js icon-192.png icon-512.png apple-touch-icon.png ./
 ENV DATABASE_FILE=/tmp/metroserver.db
 USER node
 # metroserver restarts itself if it ever exits; node is the main process the host watches.

@@ -18,6 +18,8 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 5. **Queue:** tap an upcoming song to play it now (the rest stays queued); *Recently played* lets you replay or re-suggest songs.
 6. **Hand over control:** the host can tap a participant and choose **Make host**.
 
+**Install it as an app:** on Android (Chrome) or a computer, tap **Install app** on the start screen. On iPhone/iPad, open the link in Safari, tap Share, then **Add to Home Screen**.
+
 Playback goes through YouTube's embedded player, so press play once if your browser blocks autoplay.
 
 ## How it works
