@@ -171,6 +171,7 @@ button { cursor: pointer; }
 .card { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 28px; padding: 20px; }
 .code-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .code-big { font: 700 32px/40px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--primary); white-space: nowrap; }
+.advanced-link { align-self: center; }
 .resume-card { display: flex; flex-direction: column; gap: 12px; background: var(--secondary-container); color: var(--on-secondary-container); }
 .resume-card .muted { color: inherit; opacity: .8; }
 .resume-top { display: flex; align-items: center; gap: 12px; }
@@ -378,7 +379,8 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <span class="ms muted">install_mobile</span>
                 <span class="grow"><span class="name" style="font-weight:400;display:block">Install app</span><span class="muted body-s" style="display:block" id="installHint"></span></span>
               </button>
-              <button class="row-card settings-card" id="openSettings" type="button">
+              <button class="btn-t advanced-link" id="showAdvanced" type="button">Advanced</button>
+              <button class="row-card settings-card" id="openSettings" type="button" hidden>
                 <span class="ms muted">settings</span>
                 <span class="grow"><span class="name" style="font-weight:400;display:block">Settings</span><span class="muted body-s ellipsis" style="display:block" id="serverLabel"></span></span>
                 <span class="ms muted">chevron_right</span>
@@ -683,8 +685,9 @@ const params = new URLSearchParams(location.search);
 let username = store.get('lt-name') || '';
 // On GitHub Pages the page is static; search and rooms come from the Render deployment (Dockerfile + render.yaml).
 const BACKEND = location.hostname.endsWith('github.io') ? 'https://listen-together-f6kt.onrender.com' : '';
-let serverUrl = params.get('server') || store.get('lt-server') ||
-  (BACKEND ? BACKEND.replace(/^http/, 'ws') : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || 'localhost:5500'}`) + '/ws'; // server.js proxies /ws to metroserver
+const DEFAULT_SERVER = (BACKEND ? BACKEND.replace(/^http/, 'ws') : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host || 'localhost:5500'}`) + '/ws'; // server.js proxies /ws to metroserver
+let serverUrl = params.get('server') || store.get('lt-server') || DEFAULT_SERVER;
+let showAdvanced = false;             // server setting shown on the start screen
 let joinMode = !!params.get('room');
 let codeValue = (params.get('room') || '').replace(/[^a-z0-9]/gi, '').slice(0, ROOM_CODE_LENGTH).toUpperCase();
 let conn = 'idle';                    // idle | connecting | connected | reconnecting | error
@@ -1270,6 +1273,11 @@ function renderLobby() {
   $('meName').textContent = username || 'Not set';
   $('meAvatar').textContent = initial(username);
   $('serverLabel').textContent = 'Server: ' + serverUrl;
+  // Server choice lives behind "Advanced" so friends don't change it by accident. A custom server
+  // stays visible, so nobody forgets they switched.
+  const custom = serverUrl !== DEFAULT_SERVER;
+  $('openSettings').hidden = !(showAdvanced || custom);
+  $('showAdvanced').hidden = showAdvanced || custom;
   $('cancelJoin').hidden = !joinPending;
   renderResume();
   renderCode();
@@ -1562,9 +1570,17 @@ $('primaryAction').onclick = async () => {
 };
 $('cancelJoin').onclick = () => { leaving = true; ws?.close(); joinPending = false; conn = 'idle'; renderLobby(); };
 
+$('showAdvanced').onclick = () => { showAdvanced = true; renderLobby(); };
 $('openSettings').onclick = async () => {
-  const v = await askText({ title: 'Listen Together server', label: 'Server URL', value: serverUrl, hint: 'ws:// or wss:// address of a metroserver, ending in /ws' });
-  if (!v) return;
+  const v = await askText({ title: 'Listen Together server', label: 'Server URL', value: serverUrl,
+    hint: 'Only change this to use a different metroserver (ws:// or wss://…/ws). Everyone in a room must use the same one. Leave empty to go back to the default.' });
+  if (v === null) return;   // cancelled
+  if (!v) {
+    serverUrl = DEFAULT_SERVER;
+    try { localStorage.removeItem('lt-server'); } catch {}
+    snack('Back to the default server');
+    return renderLobby();
+  }
   if (!/^wss?:\/\//i.test(v)) { snack('The server address must start with ws:// or wss://'); return; }
   serverUrl = v;
   store.set('lt-server', v);
