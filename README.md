@@ -44,7 +44,7 @@ The `Dockerfile` bundles metroserver and `server.js` into one container; `render
 
 To keep it awake, point a free uptime monitor (e.g. UptimeRobot, every 5 minutes) at `https://<your-service>.onrender.com/health`. It returns 503 if the room server is down, so the monitor also emails you about outages.
 
-Free-plan limits: the service sleeps after about 15 minutes with no traffic. The next visitor wakes it, which takes up to a minute, and rooms that were open when it went to sleep are gone.
+Free-plan limits: the service sleeps after about 15 minutes with no traffic. The next visitor wakes it, which takes up to a minute, and rooms that were open when it went to sleep are gone. Rooms also end whenever the server restarts (every push redeploys it). The host's device remembers the song, position and queue, and the start screen offers **Start a room with this music** to carry on; friends join with the new code.
 
 ## Run it yourself
 
