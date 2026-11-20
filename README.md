@@ -13,6 +13,10 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 3. **Search** for songs and videos from the top bar.
    - The host plays a result right away or adds it to the queue.
    - Guests suggest songs; the host approves or rejects them. Approved songs go next in the queue, and start right away if nothing is playing.
+   - **Albums** and **Playlists** filters: the host plays a whole album/playlist or adds all of it to the queue.
+4. **Lyrics** scroll in time with the song for everyone (from [LRCLIB](https://lrclib.net)). The host can tap a line to jump there.
+5. **Queue:** tap an upcoming song to play it now (the rest stays queued); *Recently played* lets you replay or re-suggest songs.
+6. **Hand over control:** the host can tap a participant and choose **Make host**.
 
 Playback goes through YouTube's embedded player, so press play once if your browser blocks autoplay.
 
