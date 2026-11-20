@@ -881,13 +881,31 @@ function hostAction(action, extra = {}) {
   renderPlayState();
 }
 
+// Host on a phone: locking the screen / switching apps makes the phone pause YouTube. That's not the host
+// pausing, so the room keeps playing ("detached" host) and the host's player rejoins when they come back.
+let hostDetached = false;
+const pageHidden = () => document.visibilityState === 'hidden';
+
 function onStateChange({ data: st }) {
   if (st === YT.PlayerState.CUED && track) { applyingRemote = false; trackCued(); return; }
+  if (st === YT.PlayerState.PLAYING) hostDetached = false;
   if (!isHost() || applyingRemote) return;
   if (st === YT.PlayerState.PLAYING && !anchor?.playing) hostAction('play');
-  else if (st === YT.PlayerState.PAUSED && anchor?.playing) hostAction('pause');
+  else if (st === YT.PlayerState.PAUSED && anchor?.playing && !hostDetached) {
+    // Phones may report the pause just before the page counts as hidden: decide a moment later.
+    setTimeout(() => {
+      if (pageHidden()) { hostDetached = true; return; }
+      if (!hostDetached && anchor?.playing && player.getPlayerState() === YT.PlayerState.PAUSED) hostAction('pause');
+    }, 600);
+  }
   else if (st === YT.PlayerState.ENDED) { stalled = true; skipNext(); }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (pageHidden() || !isHost() || !hostDetached || !anchor?.playing) return;
+  applyAnchor();   // jump back to where the room is; if the phone won't autoplay, the play button rejoins
+  setTimeout(() => { if (hostDetached) snack('Tap play to rejoin the room. It kept playing while you were away.'); }, 1500);
+});
 
 // Host: detect scrubbing in the YouTube controls. Guests: pull back to the room timeline.
 setInterval(() => {
@@ -895,6 +913,13 @@ setInterval(() => {
   const st = player.getPlayerState();
   const drift = Math.abs(player.getCurrentTime() * 1000 - expectedPos());
   if (isHost()) {
+    if (hostDetached) {
+      // Away from the page: don't let our paused player pause the room. Where the browser still runs this
+      // timer in the background (Android, computers), move on to the next song when this one is over.
+      const dur = player.getDuration() * 1000 || track.duration;
+      if (anchor.playing && dur && expectedPos() > dur + 1000 && !starting()) { stalled = true; skipNext(); }
+      return;
+    }
     if (st !== YT.PlayerState.PLAYING && st !== YT.PlayerState.PAUSED) return;
     const playing = st === YT.PlayerState.PLAYING;
     if (playing !== anchor.playing) hostAction(playing ? 'play' : 'pause');   // missed state event
@@ -1131,6 +1156,7 @@ function showView(name) {
 // ---- player bar ----
 $('playBtn').onclick = $('compactPlay').onclick = () => {
   if (!isHost() || !playerReady || !track) return;
+  if (hostDetached && anchor?.playing) return applyAnchor();   // rejoin the room instead of pausing everyone
   anchor?.playing ? player.pauseVideo() : player.playVideo();
 };
 $('prevBtn').onclick = () => { if (isHost() && playerReady) { player.seekTo(0, true); hostAction('seek'); } };
