@@ -116,7 +116,10 @@ async function radio(id, artist) {
     if (tracks.length) return { source: 'radio', tracks };
   } catch (err) { console.error('radio:', err.message); }
   const main = artist.split(/,| & | x | feat\.? /i)[0].trim();
-  return { source: 'artist', tracks: main ? (await search(main, 'songs')).filter(t => t.id !== id) : [] };
+  const found = main ? (await search(main, 'songs')).filter(t => t.id !== id) : [];
+  // A name search also matches titles ("Queen" -> "Queen Of The Zoo" by someone else); prefer the artist's own songs.
+  const own = found.filter(t => t.artist.toLowerCase().includes(main.toLowerCase()));
+  return { source: 'artist', tracks: own.length >= 5 ? own : found };
 }
 
 // Tracks of an album or playlist from its page. ('browse', like search, works from cloud hosts; 'next' gets refused there.)
