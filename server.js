@@ -16,6 +16,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 F
 const FILTERS = {
   songs: 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D', videos: 'EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D',
   albums: 'EgWKAQIYAWoKEAkQBRAKEAMQBA%3D%3D', playlists: 'EgeKAQQoAEABagoQAxAEEAoQCRAF',
+  artists: 'EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D',
 };
 const MAX_COLLECTION_TRACKS = 100;
 
@@ -86,10 +87,37 @@ function toCollection(r) {
   };
 }
 
+// Artist search row -> { artistId, title, subtitle, thumbnail }, or null.
+function toArtist(r) {
+  const artistId = r.navigationEndpoint?.browseEndpoint?.browseId;
+  if (!/^UC[\w-]+$/.test(artistId || '')) return null;
+  return {
+    artistId,
+    title: runsText(r.flexColumns?.[0]),
+    subtitle: runsText(r.flexColumns?.[1]),   // "Artist • 121M monthly audience"
+    thumbnail: bigArt(r.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.at(-1)?.url) || '',
+  };
+}
+
 async function search(q, type) {
   const res = await innertube('search', { query: q, params: FILTERS[type] });
   const rows = listItems(res);
-  return (type === 'albums' || type === 'playlists' ? rows.map(toCollection) : rows.map(toTrack)).filter(Boolean);
+  const toItem = type === 'albums' || type === 'playlists' ? toCollection : type === 'artists' ? toArtist : toTrack;
+  return rows.map(toItem).filter(Boolean);
+}
+
+// An artist's top songs: the "Top songs" shelf on their page links to the full list as a playlist.
+async function artistSongs(artistId) {
+  const page = await innertube('browse', { browseId: artistId });
+  let all = '';
+  (function walk(n) {
+    if (all || !n || typeof n !== 'object') return;
+    const id = n.musicShelfRenderer?.bottomEndpoint?.browseEndpoint?.browseId;
+    if (id?.startsWith('VL')) all = id.slice(2);
+    else Object.values(n).forEach(walk);
+  })(page);
+  if (all) { const tracks = await collection(all); if (tracks.length) return tracks; }
+  return listItems(page).map(toTrack).filter(Boolean);   // fall back to the few songs shown on the page
 }
 
 // Songs like this one, for endless radio. YouTube Music's own radio ('next' + RDAMVM playlist) when the
@@ -181,6 +209,11 @@ const server = http.createServer(async (req, res) => {
       const { source, tracks } = await radio(id, (url.searchParams.get('artist') || '').slice(0, 200));
       res.setHeader('x-radio-source', source);
       return json(res, 200, tracks);
+    }
+    if (url.pathname === '/api/artist') {
+      const id = url.searchParams.get('id') || '';
+      if (!/^UC[\w-]{10,40}$/.test(id)) return json(res, 400, { error: 'Bad artist id' });
+      return json(res, 200, await artistSongs(id));
     }
     if (url.pathname === '/api/collection') {
       const id = url.searchParams.get('id') || '';

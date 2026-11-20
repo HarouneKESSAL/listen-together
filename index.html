@@ -216,6 +216,7 @@ button { cursor: pointer; }
 .q-item.current .muted { color: inherit; opacity: .8; }
 .thumb { width: 48px; height: 48px; flex: none; border-radius: 8px; overflow: hidden; background: var(--sc-highest); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.round { border-radius: 50%; }
 .thumb img:not([src]), .thumb img[src=""] { display: none; }
 .q-item .grow { flex: 1; min-width: 0; }
 .empty { padding: 24px 12px; text-align: center; color: var(--on-surface-variant); }
@@ -436,6 +437,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
             <button type="button" data-type="videos"><span class="ms">check</span>Videos</button>
             <button type="button" data-type="albums"><span class="ms">check</span>Albums</button>
             <button type="button" data-type="playlists"><span class="ms">check</span>Playlists</button>
+            <button type="button" data-type="artists"><span class="ms">check</span>Artists</button>
           </div>
           <div class="grp results" id="resultList"></div>
         </div>
@@ -1050,25 +1052,26 @@ function renderResults() {
   if (search.state === 'error') return list.replaceChildren(h('div', { class: 'empty' },
     h('div', { text: 'Search is unavailable right now.' }), h('button', { class: 'btn-t', type: 'button', onclick: loadResults, text: 'Retry' })));
   if (!search.items.length) return list.replaceChildren(h('div', { class: 'empty', text: 'No results' }));
-  const collections = search.type === 'albums' || search.type === 'playlists';
+  const collections = ['albums', 'playlists', 'artists'].includes(search.type);
   list.replaceChildren(...search.items.map(t => collections ? collectionRow(t) : trackRow(t, { kind: search.type === 'videos' ? 'Video' : 'Song' })));
 }
 
 function collectionRow(c) {
   const host = isHost();
-  return h('div', { class: 'item', role: 'button', tabindex: '0', title: host ? 'Play all' : 'Only the host can play albums and playlists',
+  return h('div', { class: 'item', role: 'button', tabindex: '0', title: host ? (c.artistId ? 'Play top songs' : 'Play all') : 'Only the host can play these',
       onclick: () => playCollection(c), onkeydown: e => { if (e.key === 'Enter') playCollection(c); } },
-    art({ thumbnail: c.thumbnail }),
+    art({ thumbnail: c.thumbnail }, c.artistId ? 'round' : ''),
     h('div', { class: 'grow' }, h('div', { class: 'item-t ellipsis', text: c.title }), h('div', { class: 'muted ellipsis', text: c.subtitle })),
     host && h('button', { class: 'icon-btn', type: 'button', title: 'Add all to queue', onclick: e => { e.stopPropagation(); playCollection(c, true); } }, icon('playlist_add')));
 }
 
-// Host: play an album/playlist now (it replaces the queue), or append its songs to the queue.
+// Host: play an album/playlist/artist's top songs now (it replaces the queue), or append them to the queue.
 async function playCollection(c, append = false) {
-  if (!isHost()) return snack('Only the host can play albums and playlists');
+  if (!isHost()) return snack('Only the host can play albums, playlists and artists');
   let tracks;
   try {
-    const r = await fetch(`${BACKEND}/api/collection?id=${encodeURIComponent(c.playlistId)}`);
+    const r = await fetch(c.artistId ? `${BACKEND}/api/artist?id=${encodeURIComponent(c.artistId)}`
+      : `${BACKEND}/api/collection?id=${encodeURIComponent(c.playlistId)}`);
     if (!r.ok) throw new Error();
     tracks = await r.json();
   } catch { return snack(`Couldn't load “${c.title}”`); }
@@ -1116,6 +1119,33 @@ $('muteBtn').onclick = () => {
 };
 function renderVolIcon() { const v = +$('vol').value; $('volIcon').textContent = v === 0 ? 'volume_off' : v < 50 ? 'volume_down' : 'volume_up'; }
 $('queueBtn').onclick = () => { $('queuePane').hidden = !$('queuePane').hidden; };
+
+// Keyboard shortcuts (computers). Playback keys are host-only, like the buttons.
+//   Space/K play-pause · ←/→ 10 s back/ahead · N next · M mute · Q queue · / search
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.ctrlKey || e.metaKey || e.altKey || (e.repeat && !e.key.startsWith('Arrow'))) return;
+  if (t.closest('input:not([type=range]), textarea, select, dialog[open]')) return;          // typing
+  if ((e.key === ' ' || e.key === 'Enter') && t.closest('button, [role="button"]')) return;  // focused button handles it
+  if (t.type === 'range' && e.key.startsWith('Arrow')) return;                                 // sliders use arrows
+  const host = isHost() && playerReady && track;
+  const seekBy = s => { player.seekTo(Math.max(0, player.getCurrentTime() + s), true); hostAction('seek'); };
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if ((k === ' ' || k === 'k') && host) $('playBtn').click();
+  else if (k === 'ArrowLeft' && host) seekBy(-10);
+  else if (k === 'ArrowRight' && host) seekBy(10);
+  else if (k === 'n' && host) skipNext();
+  else if (k === 'm') $('muteBtn').click();
+  else if (k === 'q' && room.code) $('queueBtn').click();
+  else if (k === '/' && !$('q').disabled) $('q').focus();
+  else return;
+  e.preventDefault();
+});
+$('playBtn').title = 'Play / pause (Space)';
+$('prevBtn').title = 'Restart song';
+$('nextBtn').title = 'Next (N)';
+$('muteBtn').title = 'Mute (M)';
+$('queueBtn').title = 'Queue (Q)';
 $('closeQueue').onclick = () => { $('queuePane').hidden = true; };
 $('openQueue').onclick = () => { $('queuePane').hidden = false; };
 

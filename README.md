@@ -13,7 +13,7 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 3. **Search** for songs and videos from the top bar.
    - The host plays a result right away or adds it to the queue.
    - Guests suggest songs; the host approves or rejects them. Approved songs go next in the queue, and start right away if nothing is playing.
-   - **Albums** and **Playlists** filters: the host plays a whole album/playlist or adds all of it to the queue.
+   - **Albums**, **Playlists** and **Artists** filters: the host plays a whole album/playlist or an artist's top songs, or adds them all to the queue.
 4. **Lyrics** scroll in time with the song for everyone (from [LRCLIB](https://lrclib.net)). The host can tap a line to jump there.
 5. **Queue:** tap an upcoming song to play it now (the rest stays queued); *Recently played* lets you replay or re-suggest songs.
 6. **Endless radio** (host, on by default in the queue panel): when the last queued song starts, similar songs are queued so the music keeps going.
@@ -21,6 +21,8 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 8. **Hand over control:** the host can tap a participant and choose **Make host**.
 
 **Install it as an app:** on Android (Chrome) or a computer, tap **Install app** on the start screen. On iPhone/iPad, open the link in Safari, tap Share, then **Add to Home Screen**.
+
+**Keyboard shortcuts** (computers): Space/K play-pause, ←/→ back/ahead 10 s, N next song, M mute, Q queue, / search. Playback keys work for the host only.
 
 Playback goes through YouTube's embedded player, so press play once if your browser blocks autoplay.
 
