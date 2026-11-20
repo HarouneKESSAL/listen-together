@@ -22,6 +22,8 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **Install it as an app:** on Android (Chrome) or a computer, tap **Install app** on the start screen. On iPhone/iPad, open the link in Safari, tap Share, then **Add to Home Screen**.
 
+**Your own pause and volume:** guests can pause just for themselves (the room keeps playing; press play to rejoin live), and everyone sets their own volume (on phones, tap the speaker icon; iPhones use the side buttons). If the host's phone locks, the room keeps playing and the host rejoins when they come back.
+
 **Keyboard shortcuts** (computers): Space/K play-pause, ←/→ back/ahead 10 s, N next song, M mute, Q queue, / search. Playback keys work for the host only.
 
 Playback goes through YouTube's embedded player, so press play once if your browser blocks autoplay.
