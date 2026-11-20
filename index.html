@@ -293,7 +293,12 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
   .queue { position: fixed; inset: 8px 8px 84px; width: auto; margin: 0; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
   .mini { left: 16px; width: auto; }
   .pl-row { padding: 0 16px; gap: 8px; }
-  .controls, .vol { display: none; }
+  .controls { display: none; }
+  /* Volume: the icon opens the slider above the player bar */
+  .vol { position: relative; }
+  .vol input { display: none; }
+  .vol.open input { display: block; position: absolute; right: -40px; bottom: 52px; width: 180px; height: 44px; padding: 0 16px;
+    border-radius: 22px; background: var(--sc-high); box-shadow: 0 4px 16px rgba(0,0,0,.35); z-index: 5; }
   .compact-play { display: grid; }
   .pl-actions { flex: none; }
 }
@@ -868,7 +873,7 @@ function applyAnchor() {
   if (!playerReady || !anchor || !track) return;
   applyingRemote = true;
   player.seekTo(expectedPos() / 1000, true);
-  anchor.playing ? player.playVideo() : player.pauseVideo();
+  anchor.playing && !localPause ? player.playVideo() : player.pauseVideo();
   setTimeout(() => { applyingRemote = false; }, 1000);
 }
 
@@ -885,11 +890,29 @@ function hostAction(action, extra = {}) {
 // pausing, so the room keeps playing ("detached" host) and the host's player rejoins when they come back.
 let hostDetached = false;
 const pageHidden = () => document.visibilityState === 'hidden';
+// Guests can pause just for themselves; play rejoins the room at its live position.
+let localPause = false;
+function setLocalPause(on) {
+  localPause = on;
+  if (on) { player.pauseVideo(); snack('Paused just for you. The room keeps playing; press play to rejoin live.'); }
+  else applyAnchor();
+  renderPlayState();
+}
 
 function onStateChange({ data: st }) {
   if (st === YT.PlayerState.CUED && track) { applyingRemote = false; trackCued(); return; }
   if (st === YT.PlayerState.PLAYING) hostDetached = false;
-  if (!isHost() || applyingRemote) return;
+  if (!isHost()) {
+    if (applyingRemote || !track || !anchor?.playing) return;
+    // Guest used the video's own controls: same as our play/pause button.
+    if (st === YT.PlayerState.PLAYING && localPause) setLocalPause(false);
+    else if (st === YT.PlayerState.PAUSED && !localPause)
+      setTimeout(() => {   // a phone pausing it on screen lock isn't the guest choosing to pause
+        if (!pageHidden() && !localPause && player.getPlayerState() === YT.PlayerState.PAUSED) { localPause = true; renderPlayState(); }
+      }, 600);
+    return;
+  }
+  if (applyingRemote) return;
   if (st === YT.PlayerState.PLAYING && !anchor?.playing) hostAction('play');
   else if (st === YT.PlayerState.PAUSED && anchor?.playing && !hostDetached) {
     // Phones may report the pause just before the page counts as hidden: decide a moment later.
@@ -926,9 +949,10 @@ setInterval(() => {
     else if (drift > 2000) hostAction('seek');
     return;
   }
+  if (localPause) return;   // paused just for this guest: leave their player alone
   const playing = st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
   if (drift > 1500 || playing !== anchor.playing) applyAnchor();
-  if (anchor.playing && (st === YT.PlayerState.UNSTARTED || st === YT.PlayerState.CUED)) snack('Your browser blocked autoplay — press play on the video once.');
+  if (anchor.playing && !localPause && (st === YT.PlayerState.UNSTARTED || st === YT.PlayerState.CUED)) snack('Your browser blocked autoplay — press play on the video once.');
 }, 2000);
 
 window.onYouTubeIframeAPIReady = () => {
@@ -1060,7 +1084,10 @@ $('q').oninput = () => {
 $('q').onfocus = () => { if ($('suggest').childElementCount && $('q').value.trim()) $('suggest').hidden = false; };
 $('q').onkeydown = e => { if (e.key === 'Escape') closeSuggest(); };
 $('qClear').onclick = () => { $('q').value = ''; $('qClear').hidden = true; closeSuggest(); $('q').focus(); };
-document.addEventListener('pointerdown', e => { if (!e.target.closest('#suggest, #searchForm')) closeSuggest(); });
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('#suggest, #searchForm')) closeSuggest();
+  if (!e.target.closest('.vol')) document.querySelector('.vol').classList.remove('open');
+});
 
 $('searchForm').onsubmit = async e => {
   e.preventDefault();
@@ -1155,7 +1182,8 @@ function showView(name) {
 
 // ---- player bar ----
 $('playBtn').onclick = $('compactPlay').onclick = () => {
-  if (!isHost() || !playerReady || !track) return;
+  if (!playerReady || !track) return;
+  if (!isHost()) return setLocalPause(!localPause && !!anchor?.playing);   // guests: just for themselves
   if (hostDetached && anchor?.playing) return applyAnchor();   // rejoin the room instead of pausing everyone
   anchor?.playing ? player.pauseVideo() : player.playVideo();
 };
@@ -1170,7 +1198,10 @@ $('seek').onchange = e => {
 let lastVol = 100;
 $('vol').value = store.get('lt-vol') ?? 100;
 $('vol').oninput = e => { playerReady && player.setVolume(+e.target.value); store.set('lt-vol', e.target.value); renderVolIcon(); };
+const phoneLayout = matchMedia('(max-width: 600px)');
+// Volume is per listener (only your own player), remembered on this device. iPhones ignore it: use the side buttons.
 $('muteBtn').onclick = () => {
+  if (phoneLayout.matches) return $('muteBtn').parentElement.classList.toggle('open');   // phones: show/hide the slider
   const v = $('vol');
   if (+v.value) { lastVol = +v.value; v.value = 0; } else v.value = lastVol || 100;
   v.dispatchEvent(new Event('input'));
@@ -1189,7 +1220,7 @@ document.addEventListener('keydown', e => {
   const host = isHost() && playerReady && track;
   const seekBy = s => { player.seekTo(Math.max(0, player.getCurrentTime() + s), true); hostAction('seek'); };
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if ((k === ' ' || k === 'k') && host) $('playBtn').click();
+  if ((k === ' ' || k === 'k') && playerReady && track) $('playBtn').click();   // guests: pause just for themselves
   else if (k === 'ArrowLeft' && host) seekBy(-10);
   else if (k === 'ArrowRight' && host) seekBy(10);
   else if (k === 'n' && host) skipNext();
@@ -1266,7 +1297,10 @@ function renderRoom() {
   $('q').disabled = false;
   $('q').placeholder = host ? 'Search songs and videos' : 'Search to suggest a song to the host';
   if (!$('results').hidden) renderResults();   // row actions differ for host and guests
-  $('controls').hidden = $('compactPlay').hidden = !host;
+  // Everyone gets play/pause (guests: just for themselves); skipping is the host's.
+  $('controls').hidden = $('compactPlay').hidden = false;
+  $('prevBtn').hidden = $('nextBtn').hidden = !host;
+  if (host && localPause) setLocalPause(false);   // just became host: a private pause would pause the room
   $('radioRow').hidden = !host;
   if (host) maybeRadio();   // e.g. just became host with an empty queue
   $('seek').disabled = !host;
@@ -1339,9 +1373,9 @@ function renderTrack(changed) {
 }
 
 function renderPlayState() {
-  const playing = !!anchor?.playing;
+  const playing = !!anchor?.playing && !localPause;
   $('playIcon').textContent = $('compactIcon').textContent = playing ? 'pause' : 'play_arrow';
-  $('playLabel').textContent = playing ? 'Pause' : 'Play';
+  $('playLabel').textContent = playing ? 'Pause' : localPause ? 'Rejoin' : 'Play';
   $('playBtn').classList.toggle('playing', playing);
   $('nextBtn').disabled = !room.queue.length;
 }
