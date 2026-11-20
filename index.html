@@ -732,9 +732,14 @@ function connect(afterOpen, retry = false) {
   renderStatus();
   try { ws = new WebSocket(serverUrl); } catch { conn = 'error'; joinPending = false; renderLobby(); return; }
   ws.binaryType = 'arraybuffer';
+  // A connection attempt can hang half-open (e.g. while the host swaps server versions); browsers wait
+  // minutes before giving up. Abandon it after 10 s so onclose's retry logic tries again.
+  const sock = ws;
+  const openTimer = setTimeout(() => { if (sock.readyState === WebSocket.CONNECTING) sock.close(); }, 10000);
   let chain = Promise.resolve();   // decode is async (gzip); keep messages in order
   ws.onmessage = e => { chain = chain.then(() => decodeFrame(e.data)).then(([t, p]) => handle(t, p)).catch(err => console.warn('bad frame', err)); };
   ws.onopen = () => {
+    clearTimeout(openTimer);
     conn = 'connected';
     send('client_capabilities', { supports_protobuf: true, supports_compression: true, client_version: 'listen-web/0.2', features: ['origin_tag'] });
     ping();
@@ -742,7 +747,8 @@ function connect(afterOpen, retry = false) {
     renderStatus();
   };
   ws.onclose = () => {
-    if (leaving) return;
+    clearTimeout(openTimer);
+    if (leaving || sock !== ws) return;   // ignore a socket we already replaced
     if (!me.token && BACKEND && conn === 'connecting' && Date.now() - connectStarted < WAKE_GRACE_MS) {
       setTimeout(() => { if (!leaving) connect(afterOpen, true); }, 3000);   // host still waking up: keep trying
       return;
@@ -888,7 +894,7 @@ function hostAction(action, extra = {}) {
 
 // Host on a phone: locking the screen / switching apps makes the phone pause YouTube. That's not the host
 // pausing, so the room keeps playing ("detached" host) and the host's player rejoins when they come back.
-let hostDetached = false;
+let hostDetached = false, pauseCheckUntil = 0;
 const pageHidden = () => document.visibilityState === 'hidden';
 // Guests can pause just for themselves; play rejoins the room at its live position.
 let localPause = false;
@@ -916,6 +922,7 @@ function onStateChange({ data: st }) {
   if (st === YT.PlayerState.PLAYING && !anchor?.playing) hostAction('play');
   else if (st === YT.PlayerState.PAUSED && anchor?.playing && !hostDetached) {
     // Phones may report the pause just before the page counts as hidden: decide a moment later.
+    pauseCheckUntil = Date.now() + 1000;   // and keep the sync timer from deciding first
     setTimeout(() => {
       if (pageHidden()) { hostDetached = true; return; }
       if (!hostDetached && anchor?.playing && player.getPlayerState() === YT.PlayerState.PAUSED) hostAction('pause');
@@ -936,6 +943,7 @@ setInterval(() => {
   const st = player.getPlayerState();
   const drift = Math.abs(player.getCurrentTime() * 1000 - expectedPos());
   if (isHost()) {
+    if (pageHidden() && anchor.playing && st !== YT.PlayerState.PLAYING) hostDetached = true;
     if (hostDetached) {
       // Away from the page: don't let our paused player pause the room. Where the browser still runs this
       // timer in the background (Android, computers), move on to the next song when this one is over.
@@ -945,7 +953,7 @@ setInterval(() => {
     }
     if (st !== YT.PlayerState.PLAYING && st !== YT.PlayerState.PAUSED) return;
     const playing = st === YT.PlayerState.PLAYING;
-    if (playing !== anchor.playing) hostAction(playing ? 'play' : 'pause');   // missed state event
+    if (playing !== anchor.playing) { if (Date.now() > pauseCheckUntil) hostAction(playing ? 'play' : 'pause'); }   // missed state event
     else if (drift > 2000) hostAction('seek');
     return;
   }
