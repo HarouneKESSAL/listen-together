@@ -116,7 +116,7 @@ async function artistSongs(artistId) {
     if (id?.startsWith('VL')) all = id.slice(2);
     else Object.values(n).forEach(walk);
   })(page);
-  if (all) { const tracks = await collection(all); if (tracks.length) return tracks; }
+  if (all) { const { tracks } = await collection(all); if (tracks.length) return tracks; }
   return listItems(page).map(toTrack).filter(Boolean);   // fall back to the few songs shown on the page
 }
 
@@ -157,7 +157,15 @@ async function radio(id, artist) {
 async function collection(playlistId) {
   const res = await innertube('browse', { browseId: 'VL' + playlistId });
   const seen = new Set();
-  return listItems(res).map(toTrack).filter(t => t && !seen.has(t.id) && seen.add(t.id)).slice(0, MAX_COLLECTION_TRACKS);
+  const tracks = listItems(res).map(toTrack).filter(t => t && !seen.has(t.id) && seen.add(t.id)).slice(0, MAX_COLLECTION_TRACKS);
+  // Playlist pages carry their name in a header (album pages reached this way don't).
+  let title = '';
+  (function walk(n) {
+    if (title || !n || typeof n !== 'object') return;
+    if (n.musicResponsiveHeaderRenderer?.title) title = (n.musicResponsiveHeaderRenderer.title.runs || []).map(r => r.text).join('');
+    else Object.values(n).forEach(walk);
+  })(res);
+  return { title, tracks };
 }
 
 async function suggest(q) {
@@ -170,7 +178,10 @@ async function suggest(q) {
 }
 
 // The GitHub Pages copy of the page calls the API cross-origin. Read-only public search, so any origin is fine.
-const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'ngrok-skip-browser-warning' };
+const CORS = {
+  'access-control-allow-origin': '*', 'access-control-allow-headers': 'ngrok-skip-browser-warning',
+  'access-control-expose-headers': 'x-collection-title, x-radio-source',
+};
 
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...CORS });
@@ -218,7 +229,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/collection') {
       const id = url.searchParams.get('id') || '';
       if (!/^[\w-]{2,80}$/.test(id)) return json(res, 400, { error: 'Bad playlist id' });
-      return json(res, 200, await collection(id));
+      const { title, tracks } = await collection(id);
+      res.setHeader('x-collection-title', encodeURIComponent(title));
+      return json(res, 200, tracks);
     }
     if (url.pathname === '/api/suggest') return json(res, 200, q ? await suggest(q) : { queries: [], items: [] });
     res.writeHead(404).end();

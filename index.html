@@ -214,6 +214,18 @@ button { cursor: pointer; }
 .q-label { padding: 12px 12px 4px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--primary); }
 .q-item { display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 12px; border-radius: 16px; }
 .q-item.current { background: var(--secondary-container); color: var(--on-secondary-container); }
+/* chat */
+.chat-card { display: flex; flex-direction: column; gap: 8px; }
+.chat-log { min-height: 72px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+.chat-line { line-height: 20px; overflow-wrap: anywhere; }
+.chat-name { font-weight: 600; margin-right: 6px; color: var(--primary); }
+.chat-line.mine .chat-name { color: var(--on-surface-variant); }
+.chat-form { display: flex; gap: 8px; align-items: center; }
+.chat-form input { flex: 1; min-width: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--outline-variant); background: transparent; color: inherit; font: inherit; outline: none; }
+.chat-form input:focus { border-color: var(--primary); }
+/* playlists */
+.pl-tools { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 8px; }
+.np-save { align-self: flex-start; margin-top: 4px; }
 .radio-row { display: flex; align-items: center; gap: 12px; margin: 0 8px 4px; padding: 10px 12px; border-radius: 16px; background: var(--sc-high); cursor: pointer; }
 .radio-row input { width: 20px; height: 20px; accent-color: var(--primary); flex: none; }
 .q-item.clickable { cursor: pointer; }
@@ -410,6 +422,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="t ellipsis" id="npTitle"></div>
                 <div class="muted ellipsis" id="npArtist"></div>
                 <div class="bar"><i id="npBar"></i></div>
+                <button class="btn-t np-save" id="saveSong" type="button"><span class="ms">bookmark_add</span>Save to playlist</button>
               </div>
               <div class="card lyrics-card" id="lyricsCard" style="order:3" hidden>
                 <div class="section-head">
@@ -445,6 +458,17 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="section-title" style="margin-bottom:2px">Pending suggestions</div>
                 <div id="suggList" style="display:flex;flex-direction:column;gap:4px"></div>
               </div>
+              <div class="card chat-card" id="chatCard" style="order:2">
+                <div class="section-head">
+                  <div class="section-title">Chat</div>
+                  <div class="muted body-s">Only people in this room</div>
+                </div>
+                <div class="chat-log" id="chatLog" aria-live="polite"></div>
+                <form class="chat-form" id="chatForm" autocomplete="off">
+                  <input id="chatInput" maxlength="500" placeholder="Message the room" aria-label="Chat message">
+                  <button class="icon-btn" type="submit" title="Send"><span class="ms">send</span></button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -473,12 +497,29 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
           <h2>Queue</h2>
           <button class="icon-btn" id="closeQueue" type="button" title="Close"><span class="ms">close</span></button>
         </div>
+        <label class="radio-row" id="openRow" hidden>
+          <span class="ms muted">group_add</span>
+          <span class="grow"><span style="display:block;font-weight:500">Let everyone add songs</span><span class="muted body-s" style="display:block">Guests' picks go straight into the queue, no approval</span></span>
+          <input type="checkbox" id="openToggle">
+        </label>
         <label class="radio-row" id="radioRow" hidden>
           <span class="ms muted">radio</span>
           <span class="grow"><span style="display:block;font-weight:500">Endless radio</span><span class="muted body-s" style="display:block">When the queue runs out, keep playing similar songs</span></span>
           <input type="checkbox" id="radioToggle">
         </label>
         <div class="q-list" id="qList"></div>
+      </aside>
+
+      <aside class="queue" id="playlistsPane" hidden aria-label="Your playlists">
+        <div class="appbar">
+          <h2>Playlists</h2>
+          <button class="icon-btn" id="closePlaylists" type="button" title="Close"><span class="ms">close</span></button>
+        </div>
+        <div class="pl-tools">
+          <button class="btn-o" id="saveQueue" type="button"><span class="ms">playlist_add</span>Save queue as playlist</button>
+          <div class="muted body-s">Saved on this device. To import one, paste a YouTube or YouTube Music playlist link into search.</div>
+        </div>
+        <div class="q-list" id="plList"></div>
       </aside>
     </div>
   </div>
@@ -504,6 +545,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
           <button class="icon-btn" id="muteBtn" type="button" title="Mute"><span class="ms" id="volIcon">volume_up</span></button>
           <input id="vol" type="range" min="0" max="100" value="100" aria-label="Volume">
         </div>
+        <button class="icon-btn" id="playlistsBtn" type="button" title="Playlists (P)"><span class="ms">library_music</span></button>
         <button class="icon-btn" id="queueBtn" type="button" title="Queue"><span class="ms">queue_music</span></button>
       </div>
     </div>
@@ -618,7 +660,9 @@ message ApproveSuggestionPayload { string suggestion_id = 1; }
 message RejectSuggestionPayload { string suggestion_id = 1; string reason = 2; }
 message SuggestionReceivedPayload { string suggestion_id = 1; string from_user_id = 2; string from_username = 3; TrackInfo track_info = 4; }
 message SuggestionApprovedPayload { string suggestion_id = 1; TrackInfo track_info = 2; }
-message SuggestionRejectedPayload { string suggestion_id = 1; string reason = 2; }`;
+message SuggestionRejectedPayload { string suggestion_id = 1; string reason = 2; }
+message ChatMessagePayload { string text = 1; }
+message ChatReceivedPayload { string user_id = 1; string username = 2; string text = 3; int64 server_time = 4; }`;
 
 const root = protobuf.parse(PROTO, { keepCase: true }).root;
 const Envelope = root.lookupType('listentogether.Envelope');
@@ -635,6 +679,7 @@ const TYPES = {
   sync_state: 'SyncStatePayload', reconnected: 'ReconnectedPayload', server_restarting: 'ServerRestartingPayload',
   suggest_track: 'SuggestTrackPayload', approve_suggestion: 'ApproveSuggestionPayload', reject_suggestion: 'RejectSuggestionPayload',
   suggestion_received: 'SuggestionReceivedPayload', suggestion_approved: 'SuggestionApprovedPayload', suggestion_rejected: 'SuggestionRejectedPayload',
+  chat_message: 'ChatMessagePayload', chat_received: 'ChatReceivedPayload',   // our server's chat addition
 };
 const msgType = t => TYPES[t] && root.lookupType('listentogether.' + TYPES[t]);
 const ROOM_CODE_LENGTH = 8;
@@ -744,7 +789,7 @@ function connect(afterOpen, retry = false) {
   ws.onopen = () => {
     clearTimeout(openTimer);
     conn = 'connected';
-    send('client_capabilities', { supports_protobuf: true, supports_compression: true, client_version: 'listen-web/0.2', features: ['origin_tag'] });
+    send('client_capabilities', { supports_protobuf: true, supports_compression: true, client_version: 'listen-web/0.2', features: ['origin_tag', 'chat'] });
     ping();
     afterOpen();
     renderStatus();
@@ -805,12 +850,19 @@ function handle(type, p) {
     }
     case 'server_restarting': snack('Server restarting — reconnecting shortly'); break;
     case 'suggestion_received':
+      if (isHost() && openQueue) { acceptSuggestion(p.suggestion_id, { from: p.from_username, track: p.track_info }); break; }
       room.suggestions.set(p.suggestion_id, { from: p.from_username, track: p.track_info });
       snack(`${p.from_username} suggested “${p.track_info?.title}”`);
       renderPeople();
       break;
     case 'suggestion_approved': snack(`“${p.track_info?.title}” was added to the queue`); break;
-    case 'suggestion_rejected': snack('The host declined your suggestion'); break;
+    case 'suggestion_rejected': snack(p.reason ? `Not added: ${p.reason}` : 'The host declined your suggestion'); break;
+    case 'chat_received': {
+      const mine = p.user_id === me.id;
+      addChat({ name: p.username, text: p.text, mine });
+      if (!mine && $('room').hidden) snack(`${p.username}: ${p.text}`);   // reading search results: still see it
+      break;
+    }
     case 'error':
       // Server restarted (redeploy / free host slept) and forgot the room: don't sit in a dead room.
       if (me.token && ['session_not_found', 'session_expired', 'not_in_room'].includes(p.code)) { roomGone(); break; }
@@ -844,6 +896,7 @@ function onSync(p) {
   if (p.queue && ['change_track', 'queue_add', 'queue_remove', 'queue_clear', 'sync_queue'].includes(p.action)) {
     room.queue = p.queue; room.queueTitle = p.queue_title || ''; renderQueue();
     if (p.action !== 'change_track') startQueueIfIdle();   // e.g. host approved a suggestion while nothing was playing
+    moveApprovedToEnd(p);
   }
   switch (p.action) {
     case 'change_track': loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false }); maybeRadio(); break;
@@ -1104,6 +1157,8 @@ $('searchForm').onsubmit = async e => {
   e.preventDefault();
   const v = $('q').value.trim();
   if (!v) return;
+  const listId = playlistIdFromLink(v);
+  if (listId && isLink(v)) { $('q').value = ''; closeSuggest(); return importPlaylist(listId); }   // playlist / album link
   if (isLink(v)) {                      // pasted links still work
     const info = await trackFromInput(v);
     if (info) { $('q').value = ''; pickTrack(info); }
@@ -1169,16 +1224,22 @@ async function playCollection(c, append = false) {
     if (!r.ok) throw new Error();
     tracks = await r.json();
   } catch { return snack(`Couldn't load “${c.title}”`); }
-  if (!tracks.length) return snack(`“${c.title}” has no playable songs`);
+  playTracks(tracks, c.title, append);
+}
+
+// Host: play a list of songs now (replacing the queue), or append them to the queue.
+function playTracks(tracks, title, append = false) {
+  if (!isHost()) return snack('Only the host can play this');
+  if (!tracks.length) return snack(`“${title}” has no playable songs`);
   if (append && track) {
     const have = new Set([track.id, ...room.queue.map(t => t.id)]);
     const add = tracks.filter(t => !have.has(t.id));
-    if (!add.length) return snack(`Everything from “${c.title}” is already queued`);
-    send('playback_action', { action: 'sync_queue', queue: [...room.queue, ...add], queue_title: room.queueTitle || c.title });
-    snack(`Added ${add.length} songs from “${c.title}” to the queue`);
+    if (!add.length) return snack(`Everything from “${title}” is already queued`);
+    send('playback_action', { action: 'sync_queue', queue: [...room.queue, ...add], queue_title: room.queueTitle || title });
+    snack(`Added ${add.length} songs from “${title}” to the queue`);
   } else {
-    changeTrack(tracks[0], { queue: tracks.slice(1), replace_queue: true, queue_title: c.title });
-    snack(`Playing “${c.title}”`);
+    changeTrack(tracks[0], { queue: tracks.slice(1), replace_queue: true, queue_title: title });
+    snack(`Playing “${title}”`);
   }
 }
 
@@ -1218,7 +1279,7 @@ $('muteBtn').onclick = () => {
   v.dispatchEvent(new Event('input'));
 };
 function renderVolIcon() { const v = +$('vol').value; $('volIcon').textContent = v === 0 ? 'volume_off' : v < 50 ? 'volume_down' : 'volume_up'; }
-$('queueBtn').onclick = () => { $('queuePane').hidden = !$('queuePane').hidden; };
+$('queueBtn').onclick = () => togglePane('queuePane', 'playlistsPane');
 
 // Keyboard shortcuts (computers). Playback keys are host-only, like the buttons.
 //   Space/K play-pause · ←/→ 10 s back/ahead · N next · M mute · Q queue · / search
@@ -1237,6 +1298,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'n' && host) skipNext();
   else if (k === 'm') $('muteBtn').click();
   else if (k === 'q' && room.code) $('queueBtn').click();
+  else if (k === 'p') $('playlistsBtn').click();
   else if (k === '/' && !$('q').disabled) $('q').focus();
   else return;
   e.preventDefault();
@@ -1247,7 +1309,7 @@ $('nextBtn').title = 'Next (N)';
 $('muteBtn').title = 'Mute (M)';
 $('queueBtn').title = 'Queue (Q)';
 $('closeQueue').onclick = () => { $('queuePane').hidden = true; };
-$('openQueue').onclick = () => { $('queuePane').hidden = false; };
+$('openQueue').onclick = () => { $('queuePane').hidden = false; $('playlistsPane').hidden = true; };
 
 // Progress for the bottom bar and the now-playing card.
 setInterval(() => {
@@ -1317,7 +1379,8 @@ function renderRoom() {
   $('controls').hidden = $('compactPlay').hidden = false;
   $('prevBtn').hidden = $('nextBtn').hidden = !host;
   if (host && localPause) setLocalPause(false);   // just became host: a private pause would pause the room
-  $('radioRow').hidden = !host;
+  $('radioRow').hidden = $('openRow').hidden = !host;
+  renderPlaylists();   // play buttons are host-only
   if (host) maybeRadio();   // e.g. just became host with an empty queue
   $('seek').disabled = !host;
   // Tap-to-seek on lyrics is host-only; toggle it without rebuilding (keeps the scroll position).
@@ -1386,6 +1449,7 @@ function renderTrack(changed) {
   if (changed) t ? window.themeFromArtwork?.([safeImg(t.thumbnail), ytThumb(t.id)].filter(Boolean)) : window.themeReset?.();
   if (changed) loadLyrics(t);
   renderQueue();
+  $('saveQueue').disabled = !t;
 }
 
 function renderPlayState() {
@@ -1510,6 +1574,124 @@ function tickLyrics() {
   const cur = box.children[i];
   if (cur) box.scrollTop = cur.offsetTop - box.clientHeight / 3;
 }
+
+// ---- saved playlists (this device) ----
+let playlists = (() => { try { return JSON.parse(store.get('lt-playlists')) || []; } catch { return []; } })();
+const slimTrack = t => ({ id: t.id, title: t.title || t.id, artist: t.artist || '', album: t.album || '', duration: t.duration || 0, thumbnail: t.thumbnail || '' });
+function savePlaylists() { store.set('lt-playlists', JSON.stringify(playlists)); renderPlaylists(); }
+
+async function newPlaylist(tracks, suggestedName) {
+  const name = (await askText({ title: 'New playlist', label: 'Name', value: suggestedName || 'My playlist' }))?.slice(0, 80);
+  if (!name) return;
+  const seen = new Set();
+  const pl = { id: Date.now().toString(36), name, tracks: tracks.filter(t => t && !seen.has(t.id) && seen.add(t.id)).map(slimTrack) };
+  playlists.unshift(pl);
+  savePlaylists();
+  snack(`Saved “${pl.name}” (${pl.tracks.length} ${pl.tracks.length === 1 ? 'song' : 'songs'})`);
+}
+function addToPlaylist(pl, t) {
+  if (pl.tracks.some(x => x.id === t.id)) return snack(`Already in “${pl.name}”`);
+  pl.tracks.push(slimTrack(t));
+  savePlaylists();
+  snack(`Added to “${pl.name}”`);
+}
+function playlistMenu(btn, pl) {
+  openMenu(btn, pl.name, [
+    ...(isHost() ? [['play_arrow', 'Play now', () => playTracks(pl.tracks, pl.name)], ['playlist_add', 'Add all to queue', () => playTracks(pl.tracks, pl.name, true)]] : []),
+    ['edit', 'Rename', async () => { const n = (await askText({ title: 'Rename playlist', label: 'Name', value: pl.name }))?.slice(0, 80); if (n) { pl.name = n; savePlaylists(); } }],
+    ['delete', 'Delete', () => { if (confirm(`Delete “${pl.name}”? This can't be undone.`)) { playlists = playlists.filter(x => x !== pl); savePlaylists(); } }],
+  ]);
+}
+function renderPlaylists() {
+  const host = isHost();
+  $('saveQueue').disabled = !track;
+  $('plList').replaceChildren(...(playlists.length ? playlists.map(pl => {
+    const play = () => host ? playTracks(pl.tracks, pl.name) : snack('Only the host can play playlists. Host your own room to play it.');
+    const more = h('button', { class: 'icon-btn', type: 'button', title: 'More', onclick: e => { e.stopPropagation(); playlistMenu(more, pl); } }, icon('more_vert'));
+    return h('div', { class: 'q-item clickable', role: 'button', tabindex: '0', title: host ? 'Play now' : '', onclick: play, onkeydown: e => { if (e.key === 'Enter') play(); } },
+      art(pl.tracks[0]),
+      h('div', { class: 'grow' }, h('div', { class: 'ellipsis', style: 'font-weight:500', text: pl.name }),
+        h('div', { class: 'muted ellipsis body-s', text: `${pl.tracks.length} ${pl.tracks.length === 1 ? 'song' : 'songs'}` })),
+      host ? h('button', { class: 'icon-btn', type: 'button', title: 'Add all to queue', onclick: e => { e.stopPropagation(); playTracks(pl.tracks, pl.name, true); } }, icon('playlist_add')) : null,
+      more);
+  }) : [h('div', { class: 'empty', text: 'No playlists yet. Save the queue or a song to start one.' })]));
+}
+$('saveQueue').onclick = () => {
+  const tracks = [track, ...room.queue].filter(Boolean);
+  if (!tracks.length) return snack('Nothing to save yet');
+  newPlaylist(tracks, room.queueTitle || 'My playlist');
+};
+$('saveSong').onclick = () => {
+  if (!track) return;
+  const t = track;
+  openMenu($('saveSong'), 'Save to playlist', [
+    ['add', 'New playlist…', () => newPlaylist([t], t.title)],
+    ...playlists.slice(0, 20).map(pl => ['playlist_play', pl.name, () => addToPlaylist(pl, t)]),
+  ]);
+};
+const togglePane = (show, hide) => { $(show).hidden = !$(show).hidden; if (!$(show).hidden) $(hide).hidden = true; };
+$('playlistsBtn').onclick = () => { renderPlaylists(); togglePane('playlistsPane', 'queuePane'); };
+$('closePlaylists').onclick = () => { $('playlistsPane').hidden = true; };
+
+// Import a YouTube / YouTube Music playlist (or album) link pasted into search.
+const playlistIdFromLink = s => (s.match(/[?&]list=([\w-]{2,80})/) || [])[1];
+async function importPlaylist(listId) {
+  if (!isHost()) return snack('Only the host can play a playlist. Host your own room to play it.');
+  snack('Loading playlist…');
+  try {
+    const r = await fetch(`${BACKEND}/api/collection?id=${encodeURIComponent(listId)}`);
+    if (!r.ok) throw new Error();
+    const tracks = await r.json();
+    const title = decodeURIComponent(r.headers.get('x-collection-title') || '') || 'Imported playlist';
+    playTracks(tracks, title, !!track);   // something playing: add to the queue; otherwise start it
+  } catch { snack("Couldn't load that playlist. Is it public?"); }
+}
+
+// ---- host switch: everyone adds songs directly ----
+// Guest picks still arrive as suggestions (that's the protocol); the host's page accepts them at once
+// and moves them to the end of the queue (the server inserts approved songs next).
+let openQueue = store.get('lt-open-queue') === 'on';
+function acceptSuggestion(id, s) {
+  const tid = s.track?.id;
+  if (tid && (tid === track?.id || room.queue.some(t => t.id === tid))) send('reject_suggestion', { suggestion_id: id, reason: 'Already in the queue' });
+  else { send('approve_suggestion', { suggestion_id: id }); snack(`${s.from} added “${s.track?.title}”`); }
+  room.suggestions.delete(id);
+}
+$('openToggle').checked = openQueue;
+$('openToggle').onchange = e => {
+  openQueue = e.target.checked;
+  store.set('lt-open-queue', openQueue ? 'on' : 'off');
+  if (openQueue) { [...room.suggestions].forEach(([id, s]) => acceptSuggestion(id, s)); renderPeople(); }
+  snack(openQueue ? 'Everyone can add songs now' : 'Guest picks need your approval again');
+};
+function moveApprovedToEnd(p) {
+  if (!isHost() || !openQueue || p.action !== 'queue_add' || !p.insert_next || !p.track_info?.suggested_by) return;
+  const i = room.queue.findIndex(t => t.id === p.track_info.id);
+  if (i < 0 || i === room.queue.length - 1) return;
+  const q = [...room.queue.slice(0, i), ...room.queue.slice(i + 1), room.queue[i]];
+  send('playback_action', { action: 'sync_queue', queue: q, queue_title: room.queueTitle });
+}
+
+// ---- room chat (our server addition; the Metrolist app doesn't show it) ----
+const CHAT_KEEP = 200;
+function addChat({ name, text, mine }) {
+  const log = $('chatLog');
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  if (log.querySelector('.empty')) log.replaceChildren();
+  log.append(h('div', { class: 'chat-line' + (mine ? ' mine' : '') }, h('span', { class: 'chat-name', text: mine ? 'You' : name }), h('span', { text })));
+  while (log.childElementCount > CHAT_KEEP) log.firstElementChild.remove();
+  if (atBottom || mine) log.scrollTop = log.scrollHeight;
+}
+function resetChat() { $('chatLog').replaceChildren(h('div', { class: 'empty', text: 'No messages yet. Say hi!' })); }
+$('chatForm').onsubmit = e => {
+  e.preventDefault();
+  const text = $('chatInput').value.trim();
+  if (!text) return;
+  if (conn !== 'connected') return snack('Not connected. Try again in a moment.');
+  send('chat_message', { text });
+  $('chatInput').value = '';
+};
+resetChat();
 
 // ---- menu + dialog ----
 function openMenu(anchorEl, title, items) {

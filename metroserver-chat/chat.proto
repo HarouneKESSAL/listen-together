@@ -1,0 +1,15 @@
+
+// ---- Room chat (listen-together addition; appended to metroproto/listentogether.proto at build) ----
+
+// Client -> server: a chat line from a room member.
+message ChatMessagePayload {
+  string text = 1;
+}
+
+// Server -> room members that negotiated the "chat" feature.
+message ChatReceivedPayload {
+  string user_id = 1;
+  string username = 2;
+  string text = 3;
+  int64 server_time = 4;
+}

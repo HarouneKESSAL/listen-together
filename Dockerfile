@@ -10,7 +10,12 @@ ARG METROSERVER_REF=159861612e8b8a42cc1bc7c0cc0b46395720d46f
 RUN git clone https://github.com/MetrolistGroup/metroserver /build \
  && cd /build && git checkout "$METROSERVER_REF" && git submodule update --init --recursive
 WORKDIR /build
+# Room chat: our addition on top of upstream (new proto messages + Go handler). The server's own test
+# suite runs here, so a patch that stops applying or breaks anything fails the build, not the live site.
+COPY metroserver-chat /chat
+RUN cat /chat/chat.proto >> metroproto/listentogether.proto && git apply /chat/chat.patch
 RUN bash scripts/generate_proto.sh \
+ && go test ./internal/server/ \
  && CGO_ENABLED=0 go build -o metroserver -ldflags="-w -s" ./cmd/metroserver
 
 FROM node:22-alpine

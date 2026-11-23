@@ -22,6 +22,10 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **Install it as an app:** on Android (Chrome) or a computer, tap **Install app** on the start screen. On iPhone/iPad, open the link in Safari, tap Share, then **Add to Home Screen**.
 
+**Chat:** everyone in the room can chat (only approved members; messages aren't saved and disappear when the room ends). Chat is our addition to the room server, so Metrolist app users don't see it.
+
+**Playlists:** save the queue or any song to your own playlists (stored on your device), and play or queue them in any room you host. Paste a YouTube or YouTube Music playlist/album link into search to play it. The host can also switch on **Let everyone add songs** in the queue panel, so guests' picks go straight into the queue.
+
 **Your own pause and volume:** guests can pause just for themselves (the room keeps playing; press play to rejoin live), and everyone sets their own volume (on phones, tap the speaker icon; iPhones use the side buttons). If the host's phone locks, the room keeps playing and the host rejoins when they come back.
 
 **Keyboard shortcuts** (computers): Space/K play-pause, ←/→ back/ahead 10 s, N next song, M mute, Q queue, / search. Playback keys work for the host only.
@@ -33,6 +37,7 @@ Playback goes through YouTube's embedded player, so press play once if your brow
 - `index.html` is the whole client: a single static page, no build step.
 - `server.js` is a dependency-free Node server: serves the page, proxies search, and forwards rooms to metroserver.
 - Rooms run on a self-hosted [metroserver](https://github.com/MetrolistGroup/metroserver), the open-source Listen Together server used by Metrolist, over its WebSocket/protobuf protocol.
+- Room chat is added on top of metroserver by `metroserver-chat/` (two proto messages + a Go handler with tests), applied by the `Dockerfile` at build time. Clients only get chat if they ask for the `chat` feature, so the Metrolist app is unaffected.
 - Search uses YouTube Music's web API through a small proxy on the same machine as the room server, because browsers can't call that API directly.
 - The room server and search proxy run together in one container on Render's free plan (see below). The first visit after a quiet spell can take up to a minute while it wakes.
 

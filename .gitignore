@@ -10,3 +10,5 @@
 !manifest.webmanifest
 !sw.js
 !*.png
+!metroserver-chat/
+!metroserver-chat/*

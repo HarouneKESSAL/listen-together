@@ -1,0 +1,305 @@
+diff --git a/internal/server/chat.go b/internal/server/chat.go
+new file mode 100644
+index 0000000..818509c
+--- /dev/null
++++ b/internal/server/chat.go
+@@ -0,0 +1,88 @@
++package server
++
++import (
++	"strings"
++	"time"
++	"unicode"
++	"unicode/utf8"
++
++	"go.uber.org/zap"
++)
++
++// Room chat (listen-together addition). Only members of the room (not pending joiners) can send,
++// and only members that negotiated FeatureChat receive, so clients without chat support are unaffected.
++const (
++	MaxChatMessageRunes = 500
++	ChatRateWindow      = 10 * time.Second
++	ChatRateLimit       = 8 // messages per window per client
++)
++
++// cleanChatText trims the message and replaces control characters (including newlines) with spaces.
++func cleanChatText(text string) string {
++	text = strings.Map(func(r rune) rune {
++		if unicode.IsControl(r) {
++			return ' '
++		}
++		return r
++	}, text)
++	return strings.TrimSpace(text)
++}
++
++// allowChat applies the per-client chat rate limit.
++func (c *Client) allowChat(now time.Time) bool {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if now.Sub(c.chatWindowStart) > ChatRateWindow {
++		c.chatWindowStart = now
++		c.chatCount = 0
++	}
++	if c.chatCount >= ChatRateLimit {
++		return false
++	}
++	c.chatCount++
++	return true
++}
++
++func (s *Server) handleChatMessage(c *Client, payload []byte) {
++	var p ChatMessagePayload
++	if err := decodePayload(payload, MsgTypeChatMessage, &p); err != nil {
++		c.sendError(s.logger, "invalid_payload", "Invalid chat message payload")
++		return
++	}
++	text := cleanChatText(p.Text)
++	if text == "" || !utf8.ValidString(text) {
++		c.sendError(s.logger, "invalid_chat_message", "Message is empty")
++		return
++	}
++	if utf8.RuneCountInString(text) > MaxChatMessageRunes {
++		c.sendError(s.logger, "chat_message_too_long", "Message is too long")
++		return
++	}
++
++	room := c.currentRoom()
++	if room == nil {
++		c.sendError(s.logger, "not_in_room", "You are not in a room")
++		return
++	}
++	now := time.Now()
++	if !c.allowChat(now) {
++		c.sendError(s.logger, "chat_rate_limited", "You're sending messages too fast")
++		return
++	}
++
++	clientID := c.clientID()
++	room.mu.Lock()
++	if room.Clients[clientID] != c {
++		room.mu.Unlock()
++		c.sendError(s.logger, "not_in_room", "You are not in a room")
++		return
++	}
++	msg := ChatReceivedPayload{UserID: clientID, Username: c.userName(), Text: text, ServerTime: now.UnixMilli()}
++	recipients := withFeature(roomClientsLocked(room), FeatureChat)
++	room.mu.Unlock()
++
++	for _, member := range recipients {
++		member.sendMessage(s.logger, MsgTypeChatReceived, msg)
++	}
++	s.logger.Debug("Chat message", zap.String("room_code", room.Code), zap.String("from_user", clientID))
++}
+diff --git a/internal/server/chat_test.go b/internal/server/chat_test.go
+new file mode 100644
+index 0000000..6703d24
+--- /dev/null
++++ b/internal/server/chat_test.go
+@@ -0,0 +1,82 @@
++package server
++
++import (
++	"strings"
++	"testing"
++
++	pb "github.com/MetrolistGroup/metroserver/proto"
++)
++
++func sendChat(t *testing.T, server *Server, from *Client, text string) {
++	t.Helper()
++	server.handleChatMessage(from, encodeTestPayload(t, MsgTypeChatMessage, &ChatMessagePayload{Text: text}))
++}
++
++func TestChatDeliversCleanTextToChatMembers(t *testing.T) {
++	server, _, host, guest := roomTestFixture()
++	withFeatures(host, FeatureChat)
++	withFeatures(guest, FeatureChat)
++
++	sendChat(t, server, guest, "  hi\nthere\t ")
++
++	for _, member := range []*Client{host, guest} {
++		var got pb.ChatReceivedPayload
++		if typ := receiveTestMessage(t, member, &got); typ != MsgTypeChatReceived {
++			t.Fatalf("message type = %q, want %q", typ, MsgTypeChatReceived)
++		}
++		if got.Text != "hi there" || got.UserId != "guest" || got.Username != "Guest" || got.ServerTime == 0 {
++			t.Fatalf("unexpected chat payload: %#v", &got)
++		}
++	}
++}
++
++func TestChatSkipsClientsWithoutFeature(t *testing.T) {
++	server, _, host, guest := roomTestFixture()
++	withFeatures(host, FeatureChat) // guest is e.g. the Metrolist app: no chat feature
++
++	sendChat(t, server, host, "hello")
++
++	if typ := receiveTestMessage(t, host, nil); typ != MsgTypeChatReceived {
++		t.Fatalf("host got %q, want %q", typ, MsgTypeChatReceived)
++	}
++	if types := drainTypes(t, guest); len(types) != 0 {
++		t.Fatalf("guest without chat feature got %v", types)
++	}
++}
++
++func TestChatRejectsNonMembersAndBadMessages(t *testing.T) {
++	server, room, host, _ := roomTestFixture()
++	withFeatures(host, FeatureChat)
++
++	t.Run("pending joiner", func(t *testing.T) {
++		pending := newClient("pending", nil)
++		pending.setUsername("Pending")
++		room.PendingJoins["pending"] = pending
++		sendChat(t, server, pending, "let me in")
++		receiveRoomError(t, pending, "not_in_room")
++		if types := drainTypes(t, host); len(types) != 0 {
++			t.Fatalf("host got %v from a pending joiner", types)
++		}
++	})
++	t.Run("empty", func(t *testing.T) {
++		sendChat(t, server, host, " \n\t ")
++		receiveRoomError(t, host, "invalid_chat_message")
++	})
++	t.Run("too long", func(t *testing.T) {
++		sendChat(t, server, host, strings.Repeat("é", MaxChatMessageRunes+1))
++		receiveRoomError(t, host, "chat_message_too_long")
++	})
++}
++
++func TestChatRateLimit(t *testing.T) {
++	server, _, host, _ := roomTestFixture()
++	withFeatures(host, FeatureChat)
++	for i := 0; i < ChatRateLimit; i++ {
++		sendChat(t, server, host, "spam")
++		if typ := receiveTestMessage(t, host, nil); typ != MsgTypeChatReceived {
++			t.Fatalf("message %d: got %q, want %q", i+1, typ, MsgTypeChatReceived)
++		}
++	}
++	sendChat(t, server, host, "one too many")
++	receiveRoomError(t, host, "chat_rate_limited")
++}
+diff --git a/internal/server/client.go b/internal/server/client.go
+index 4c029cb..f67eb56 100644
+--- a/internal/server/client.go
++++ b/internal/server/client.go
+@@ -52,6 +52,8 @@ type Client struct {
+ 	replied            atomic.Bool   // a reply or error was sent for requestID
+ 	lastPingSent       atomic.Int64  // unix nanos of the last control PING
+ 	rttMs              atomic.Int64  // last control PING round trip; 0 = unknown
++	chatWindowStart    time.Time     // chat rate limit window, guarded by mu
++	chatCount          int
+ }
+ 
+ func newClient(id string, conn *websocket.Conn) *Client {
+diff --git a/internal/server/codec.go b/internal/server/codec.go
+index d557dae..fe7b99f 100644
+--- a/internal/server/codec.go
++++ b/internal/server/codec.go
+@@ -280,6 +280,12 @@ func toProtoMessage(payload interface{}) (proto.Message, error) {
+ 		return pbPayload, nil
+ 	case *SuggestionRejectedPayload:
+ 		return &pb.SuggestionRejectedPayload{SuggestionId: p.SuggestionID, Reason: p.Reason}, nil
++	case *ChatMessagePayload:
++		return &pb.ChatMessagePayload{Text: p.Text}, nil
++	case *ChatReceivedPayload:
++		return &pb.ChatReceivedPayload{UserId: p.UserID, Username: p.Username, Text: p.Text, ServerTime: p.ServerTime}, nil
++	case ChatReceivedPayload:
++		return &pb.ChatReceivedPayload{UserId: p.UserID, Username: p.Username, Text: p.Text, ServerTime: p.ServerTime}, nil
+ 
+ 	// Value types (from sendMessage)
+ 	case RoomCreatedPayload:
+@@ -531,6 +537,12 @@ func fromProtoMessage(msgType string, data []byte) (interface{}, error) {
+ 			return nil, err
+ 		}
+ 		return &RejectSuggestionPayload{SuggestionID: pb.SuggestionId, Reason: pb.Reason}, nil
++	case MsgTypeChatMessage:
++		var pb pb.ChatMessagePayload
++		if err := proto.Unmarshal(data, &pb); err != nil {
++			return nil, err
++		}
++		return &ChatMessagePayload{Text: pb.Text}, nil
+ 	case MsgTypeReconnect:
+ 		var pb pb.ReconnectPayload
+ 		if err := proto.Unmarshal(data, &pb); err != nil {
+@@ -742,6 +754,12 @@ func decodePayload(payloadBytes []byte, msgType string, target interface{}) erro
+ 			return fmt.Errorf("payload type mismatch: expected ClientCapabilitiesPayload, got %T", payload)
+ 		}
+ 		*t = *p
++	case *ChatMessagePayload:
++		p, ok := payload.(*ChatMessagePayload)
++		if !ok {
++			return fmt.Errorf("payload type mismatch: expected ChatMessagePayload, got %T", payload)
++		}
++		*t = *p
+ 	default:
+ 		return fmt.Errorf("unsupported target type: %T", target)
+ 	}
+diff --git a/internal/server/protocol.go b/internal/server/protocol.go
+index ad7ec89..c00cfc1 100644
+--- a/internal/server/protocol.go
++++ b/internal/server/protocol.go
+@@ -18,6 +18,7 @@ const (
+ 	MsgTypeApproveSuggestion  = "approve_suggestion"
+ 	MsgTypeRejectSuggestion   = "reject_suggestion"
+ 	MsgTypeClientCapabilities = "client_capabilities"
++	MsgTypeChatMessage        = "chat_message"
+ 
+ 	// Server -> Client
+ 	MsgTypeRoomCreated         = "room_created"
+@@ -44,6 +45,7 @@ const (
+ 	MsgTypeAck                 = "ack"
+ 	MsgTypeServerRestarting    = "server_restarting"
+ 	MsgTypeSuggestionSubmitted = "suggestion_submitted"
++	MsgTypeChatReceived        = "chat_received"
+ )
+ 
+ // Optional protocol features negotiated through client_capabilities.features.
+@@ -60,11 +62,13 @@ const (
+ 	FeatureHostSequence     = "host_sequence"     // playback_action.host_sequence stale-observation guard
+ 	FeatureTrackRevision    = "track_revision"    // buffer_ready.track_revision
+ 	FeatureUpdateTrack      = "update_track"      // update_track action (metadata change without restart)
++	FeatureChat             = "chat"              // chat_message -> chat_received to room members
+ )
+ 
+ var serverFeatures = []string{
+ 	FeatureRequestID, FeatureOriginTag, FeatureDriftReport, FeatureDesyncCanary, FeatureServerRestarting,
+ 	FeatureSuggestionAck, FeatureReplaceQueue, FeatureHostSequence, FeatureTrackRevision, FeatureUpdateTrack,
++	FeatureChat,
+ }
+ 
+ // Playback actions
+@@ -225,6 +229,19 @@ type SuggestionRejectedPayload struct {
+ 	Reason       string `json:"reason,omitempty"`
+ }
+ 
++// ChatMessagePayload is a chat line sent by a room member.
++type ChatMessagePayload struct {
++	Text string `json:"text"`
++}
++
++// ChatReceivedPayload is a chat line delivered to room members that negotiated FeatureChat.
++type ChatReceivedPayload struct {
++	UserID     string `json:"user_id"`
++	Username   string `json:"username"`
++	Text       string `json:"text"`
++	ServerTime int64  `json:"server_time"`
++}
++
+ // TrackInfo contains information about a track
+ type TrackInfo struct {
+ 	ID          string `json:"id"`
+diff --git a/internal/server/server.go b/internal/server/server.go
+index eb9b4f9..2ee9d05 100644
+--- a/internal/server/server.go
++++ b/internal/server/server.go
+@@ -456,6 +456,8 @@ func (s *Server) handleMessage(c *Client, data []byte, receivedAt int64) {
+ 		s.handleRejectSuggestion(c, payloadBytes)
+ 	case MsgTypeClientCapabilities:
+ 		s.handleClientCapabilities(c, payloadBytes)
++	case MsgTypeChatMessage:
++		s.handleChatMessage(c, payloadBytes)
+ 	default:
+ 		c.sendError(s.logger, "unknown_message_type", fmt.Sprintf("Unknown message type: %s", msgType))
+ 	}
