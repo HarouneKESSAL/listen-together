@@ -24,7 +24,7 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **Chat:** everyone in the room can chat (only approved members; messages aren't saved and disappear when the room ends). Chat is our addition to the room server, so Metrolist app users don't see it.
 
-**Playlists:** save the queue or any song to your own playlists (stored on your device), and play or queue them in any room you host. Paste a YouTube or YouTube Music playlist/album link into search to play it. The host can also switch on **Let everyone add songs** in the queue panel, so guests' picks go straight into the queue.
+**Playlists:** save the queue or any song to your own playlists (stored on your device), and play or queue them in any room you host. Paste a YouTube or YouTube Music playlist/album link into search to play it. **Spotify** public playlist and album links work too: Spotify's audio can't play outside Spotify, so each song is found on YouTube Music (first 100 songs; the odd remix or obscure track may be missing). This reads Spotify's public embed pages, so it can break if Spotify changes them. The host can also switch on **Let everyone add songs** in the queue panel, so guests' picks go straight into the queue.
 
 **Your own pause and volume:** guests can pause just for themselves (the room keeps playing; press play to rejoin live), and everyone sets their own volume (on phones, tap the speaker icon; iPhones use the side buttons). If the host's phone locks, the room keeps playing and the host rejoins when they come back.
 

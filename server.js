@@ -168,6 +168,51 @@ async function collection(playlistId) {
   return { title, tracks };
 }
 
+// ---- Spotify import: read a public playlist/album's song list, then find each song on YouTube Music ----
+// Uses the public embed page (no Spotify account or API key). Limitation: unofficial page format; if Spotify
+// changes it this breaks, and the fix is the official Web API with a developer app's keys.
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0 Safari/537.36';
+async function spotifyList(type, id) {
+  const r = await fetch(`https://open.spotify.com/embed/${type}/${id}`, { headers: { 'user-agent': BROWSER_UA }, signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error(`Spotify embed: HTTP ${r.status}`);
+  const m = (await r.text()).match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  const entity = m && JSON.parse(m[1])?.props?.pageProps?.state?.data?.entity;
+  if (!entity?.trackList) throw new Error('Spotify embed: no track list');
+  return {
+    title: entity.name || entity.title || 'Spotify playlist',
+    tracks: entity.trackList.slice(0, MAX_COLLECTION_TRACKS).map(t => ({
+      title: t.title || '', artist: (t.subtitle || '').replace(/ /g, ' '), duration: t.duration || 0,
+    })).filter(t => t.title),
+  };
+}
+
+// Best YouTube Music song for a title/artist/duration (ms), or null. Matches are cached (same songs get imported often).
+const matchCache = new Map();
+const VERSION_WORDS = /\b(demo|live|remix|acoustic|instrumental|karaoke|cover|sped up|slowed|reverb|piano|version|edit|remaster(ed)?)\b/g;
+const norm = s => s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+async function matchSong(title, artist, duration) {
+  const key = `${title}\n${artist}\n${Math.round(duration / 5000)}`;
+  if (matchCache.has(key)) return matchCache.get(key);
+  // "Song - Remastered 2011" / "Song (feat. X)" -> "Song"; first credited artist only.
+  const cleanTitle = title.replace(/\s+-\s+.*(remaster|version|edit|mix|live|mono|stereo).*$/i, '').replace(/\s*[([](feat|ft|with)\.?\s[^)\]]*[)\]]/gi, '').trim();
+  const mainArtist = artist.split(/,| & | x | feat\.? /i)[0].trim();
+  const results = (await search(`${cleanTitle} ${mainArtist}`.trim(), 'songs')).slice(0, 5);
+  let best = null, bestPenalty = Infinity;
+  for (const t of results) {
+    const artistOk = mainArtist && norm(t.artist).includes(norm(mainArtist));
+    const titleOk = norm(t.title).includes(norm(cleanTitle)) || norm(cleanTitle).includes(norm(t.title));
+    const durOff = duration && t.duration ? Math.abs(t.duration - duration) / 1000 : 20;   // seconds; unknown = middling
+    // A "demo"/"live"/"remix"… version only fits when the Spotify title asks for one.
+    const extra = (norm(t.title).match(VERSION_WORDS) || []).filter(w => !norm(title).includes(w)).length;
+    const penalty = (artistOk ? 0 : 30) + (titleOk ? 0 : 20) + Math.min(durOff, 60) + extra * 15;
+    if (penalty < bestPenalty) { best = t; bestPenalty = penalty; }
+  }
+  const match = bestPenalty <= 45 ? best : null;   // e.g. right artist, title and within ~45 s
+  if (matchCache.size > 5000) matchCache.delete(matchCache.keys().next().value);
+  matchCache.set(key, match);
+  return match;
+}
+
 async function suggest(q) {
   const res = await innertube('music/get_search_suggestions', { input: q });
   const sections = res.contents || [];
@@ -232,6 +277,16 @@ const server = http.createServer(async (req, res) => {
       const { title, tracks } = await collection(id);
       res.setHeader('x-collection-title', encodeURIComponent(title));
       return json(res, 200, tracks);
+    }
+    if (url.pathname === '/api/spotify') {
+      const type = url.searchParams.get('type'), id = url.searchParams.get('id') || '';
+      if (!['playlist', 'album'].includes(type) || !/^[A-Za-z0-9]{22}$/.test(id)) return json(res, 400, { error: 'Bad Spotify link' });
+      return json(res, 200, await spotifyList(type, id));
+    }
+    if (url.pathname === '/api/match') {
+      const title = (url.searchParams.get('title') || '').slice(0, 200), artist = (url.searchParams.get('artist') || '').slice(0, 200);
+      if (!title) return json(res, 400, { error: 'Title required' });
+      return json(res, 200, await matchSong(title, artist, Number(url.searchParams.get('duration')) || 0));
     }
     if (url.pathname === '/api/suggest') return json(res, 200, q ? await suggest(q) : { queries: [], items: [] });
     res.writeHead(404).end();

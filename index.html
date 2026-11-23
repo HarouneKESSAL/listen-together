@@ -517,7 +517,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
         </div>
         <div class="pl-tools">
           <button class="btn-o" id="saveQueue" type="button"><span class="ms">playlist_add</span>Save queue as playlist</button>
-          <div class="muted body-s">Saved on this device. To import one, paste a YouTube or YouTube Music playlist link into search.</div>
+          <div class="muted body-s">Saved on this device. To import one, paste a Spotify, YouTube or YouTube Music playlist link into search.</div>
         </div>
         <div class="q-list" id="plList"></div>
       </aside>
@@ -1142,7 +1142,7 @@ $('q').oninput = () => {
   const v = $('q').value.trim();
   $('qClear').hidden = !v;
   clearTimeout(suggestTimer);
-  if (!v || isLink(v)) return closeSuggest();
+  if (!v || isLink(v) || spotifyFromLink(v)) return closeSuggest();
   suggestTimer = setTimeout(() => loadSuggest(v), 150);
 };
 $('q').onfocus = () => { if ($('suggest').childElementCount && $('q').value.trim()) $('suggest').hidden = false; };
@@ -1157,6 +1157,8 @@ $('searchForm').onsubmit = async e => {
   e.preventDefault();
   const v = $('q').value.trim();
   if (!v) return;
+  const sp = spotifyFromLink(v);
+  if (sp) { $('q').value = ''; closeSuggest(); return importSpotify(sp); }
   const listId = playlistIdFromLink(v);
   if (listId && isLink(v)) { $('q').value = ''; closeSuggest(); return importPlaylist(listId); }   // playlist / album link
   if (isLink(v)) {                      // pasted links still work
@@ -1645,6 +1647,46 @@ async function importPlaylist(listId) {
     const title = decodeURIComponent(r.headers.get('x-collection-title') || '') || 'Imported playlist';
     playTracks(tracks, title, !!track);   // something playing: add to the queue; otherwise start it
   } catch { snack("Couldn't load that playlist. Is it public?"); }
+}
+
+// Spotify playlist/album link: the server reads its song list, then each song is looked up on YouTube Music
+// (Spotify's own audio can't play outside Spotify). Four lookups at a time, with progress.
+const spotifyFromLink = s => {
+  const m = s.match(/open\.spotify\.com\/(?:intl-[\w-]+\/)?(playlist|album)\/([A-Za-z0-9]{22})/) || s.match(/^spotify:(playlist|album):([A-Za-z0-9]{22})$/);
+  return m && { type: m[1], id: m[2] };
+};
+let spotifyBusy = false;
+async function importSpotify({ type, id }) {
+  if (!isHost()) return snack('Only the host can play a playlist. Host your own room to play it.');
+  if (spotifyBusy) return snack('Already importing a Spotify playlist…');
+  spotifyBusy = true;
+  try {
+    snack('Reading the Spotify playlist…');
+    const r = await fetch(`${BACKEND}/api/spotify?type=${type}&id=${id}`);
+    if (!r.ok) throw new Error();
+    const { title, tracks } = await r.json();
+    if (!tracks.length) return snack(`“${title}” is empty`);
+    const found = new Array(tracks.length);
+    let next = 0, done = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (next < tracks.length) {
+        const i = next++, t = tracks[i];
+        try {
+          const m = await fetch(`${BACKEND}/api/match?` + new URLSearchParams({ title: t.title, artist: t.artist, duration: t.duration }));
+          found[i] = m.ok ? await m.json() : null;
+        } catch { found[i] = null; }
+        snack(`Finding “${title}” on YouTube Music… ${++done}/${tracks.length}`);
+      }
+    }));
+    const seen = new Set();
+    const matched = found.filter(t => t && !seen.has(t.id) && seen.add(t.id));
+    if (!matched.length) return snack(`Couldn't find any songs from “${title}” on YouTube Music`);
+    playTracks(matched, title, !!track);   // something playing: add to the queue; otherwise start it
+    const missed = tracks.length - matched.length;
+    setTimeout(() => snack(`Imported ${matched.length} of ${tracks.length} songs from “${title}”` +
+      (missed ? ` (${missed} not found on YouTube Music)` : '')), 1500);
+  } catch { snack("Couldn't read that Spotify link. Is the playlist public?"); }
+  finally { spotifyBusy = false; }
 }
 
 // ---- host switch: everyone adds songs directly ----
