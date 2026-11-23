@@ -178,10 +178,12 @@ async function spotifyList(type, id) {
   const m = (await r.text()).match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
   const entity = m && JSON.parse(m[1])?.props?.pageProps?.state?.data?.entity;
   if (!entity?.trackList) throw new Error('Spotify embed: no track list');
+  // Some responses carry HTML-escaped text ("&amp;"); decode the common entities.
+  const text = s => (s || '').replace(/ /g, ' ').replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e) => ({ amp: '&', quot: '"', '#39': "'", apos: "'", lt: '<', gt: '>' })[e]);
   return {
-    title: entity.name || entity.title || 'Spotify playlist',
+    title: text(entity.name || entity.title) || 'Spotify playlist',
     tracks: entity.trackList.slice(0, MAX_COLLECTION_TRACKS).map(t => ({
-      title: t.title || '', artist: (t.subtitle || '').replace(/ /g, ' '), duration: t.duration || 0,
+      title: text(t.title), artist: text(t.subtitle), duration: t.duration || 0,
     })).filter(t => t.title),
   };
 }
