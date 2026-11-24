@@ -238,6 +238,12 @@ button { cursor: pointer; }
 @keyframes floatUp { 0% { opacity: 0; transform: translateY(0) scale(.7); } 15% { opacity: 1; transform: translateY(-24px) scale(1.15); }
   100% { opacity: 0; transform: translateY(-280px) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .float-react { animation: fadeOut 2s ease-out forwards; } @keyframes fadeOut { to { opacity: 0; } } }
+.android-tip { display: flex; flex-direction: column; gap: 8px; }
+.tip-head { display: flex; align-items: center; gap: 10px; }
+.tip-head .ms { color: var(--primary); }
+.pocket { position: fixed; inset: 0; z-index: 100; background: #000; cursor: none; touch-action: manipulation; user-select: none; }
+.pocket-info { position: absolute; color: #3a3a3a; font-size: 13px; line-height: 18px; text-align: center; transition: left 2s, top 2s; max-width: 70vw; }
+#pocketSong { color: #555; font-weight: 600; }
 /* playlists */
 .pl-tools { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 8px; }
 .np-save { margin-left: -12px; }
@@ -328,7 +334,8 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
   .vol.open input { display: block; position: absolute; right: -40px; bottom: 52px; width: 180px; height: 44px; padding: 0 16px;
     border-radius: 22px; background: var(--sc-high); box-shadow: 0 4px 16px rgba(0,0,0,.35); z-index: 5; }
   .compact-play { display: grid; }
-  .pl-actions { flex: none; }
+  .pl-actions { flex: none; gap: 0; }
+  .pl-actions .icon-btn { width: 34px; height: 34px; }   /* five buttons: leave room for the song title */
 }
 </style>
 </head>
@@ -430,6 +437,18 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="code-actions">
                   <button class="btn-o" id="copyCode" type="button">Copy code</button>
                   <button class="btn-o" id="showQr" type="button"><span class="ms">qr_code_2</span>QR code</button>
+                </div>
+              </div>
+              <div class="card android-tip" id="androidTip" style="order:1" hidden>
+                <div class="tip-head">
+                  <span class="ms">android</span>
+                  <div class="grow" style="font-weight:600">Music with the screen off</div>
+                  <button class="icon-btn" id="androidTipClose" type="button" title="Don't show again"><span class="ms">close</span></button>
+                </div>
+                <div class="body-s">Phones pause the music here when the screen turns off. The <b>Metrolist</b> app keeps playing and can join this room: in its Listen Together settings, set the server address below, then join with the room code.</div>
+                <div class="code-actions" style="justify-content:flex-start">
+                  <button class="btn-o" id="copyServer" type="button"><span class="ms">content_copy</span>Copy server address</button>
+                  <a class="btn-t" href="https://github.com/MetrolistGroup/Metrolist/releases/latest" target="_blank" rel="noopener">Get Metrolist</a>
                 </div>
               </div>
               <div class="card np" id="nowCard" style="order:3" hidden>
@@ -568,6 +587,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
           <input id="vol" type="range" min="0" max="100" value="100" aria-label="Volume">
         </div>
         <button class="icon-btn" id="playlistsBtn" type="button" title="Playlists (P)"><span class="ms">library_music</span></button>
+        <button class="icon-btn" id="pocketBtn" type="button" title="Pocket mode: black screen, music keeps playing" hidden><span class="ms">bedtime</span></button>
         <button class="icon-btn" id="queueBtn" type="button" title="Queue"><span class="ms">queue_music</span></button>
       </div>
     </div>
@@ -598,6 +618,9 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
   </div>
 </dialog>
 <button class="chat-pill" id="chatPill" type="button" hidden></button>
+<div class="pocket" id="pocket" hidden role="dialog" aria-label="Pocket mode">
+  <div class="pocket-info" id="pocketInfo"><div id="pocketSong"></div><div>Double-tap to wake</div></div>
+</div>
 <div class="snack" id="snack" role="status"></div>
 
 <script type="module">
@@ -1416,6 +1439,8 @@ function renderRoom() {
   $('prevBtn').hidden = $('nextBtn').hidden = !host;
   if (host && localPause) setLocalPause(false);   // just became host: a private pause would pause the room
   $('radioRow').hidden = $('openRow').hidden = !host;
+  $('pocketBtn').hidden = false;
+  renderAndroidTip();
   renderPlaylists();   // play buttons are host-only
   if (host) maybeRadio();   // e.g. just became host with an empty queue
   $('seek').disabled = !host;
@@ -1490,7 +1515,64 @@ function renderTrack(changed) {
   $('saveQueue').disabled = !t;
 }
 
+// ---- phones: keep the screen on while listening (browsers pause YouTube when the screen turns off) ----
+let wakeLock = null, wakeBusy = false;
+const listening = () => !!room.code && !!track && !!anchor?.playing && !localPause;
+async function syncWakeLock() {
+  if (!('wakeLock' in navigator) || wakeBusy) return;
+  wakeBusy = true;
+  try {
+    if (listening() && !pageHidden()) {
+      if (!wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });   // the browser drops it when the page is hidden
+      }
+    } else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { wakeLock = null; }   // e.g. battery saver refuses it
+  finally { wakeBusy = false; }
+}
+document.addEventListener('visibilitychange', syncWakeLock);
+
+// Pocket mode: an all-black screen (very little power on OLED phones) that keeps the screen awake.
+// Leave with a double tap so a pocket brush doesn't wake it. The small text drifts to avoid burn-in.
+let pocketDrift, lastPocketTap = 0;
+function pocketMove() {
+  const info = $('pocketInfo');
+  info.style.left = `${10 + Math.random() * 45}vw`;
+  info.style.top = `${15 + Math.random() * 65}vh`;
+}
+function enterPocket() {
+  $('pocketSong').textContent = track ? `${track.title}${track.artist ? ' — ' + track.artist : ''}` : '';
+  $('pocket').hidden = false;
+  pocketMove();
+  pocketDrift = setInterval(pocketMove, 30000);
+  document.documentElement.requestFullscreen?.().catch(() => {});   // hides the status bar where allowed (Android)
+  syncWakeLock();
+}
+function exitPocket() {
+  $('pocket').hidden = true;
+  clearInterval(pocketDrift);
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+$('pocketBtn').onclick = enterPocket;
+$('pocket').addEventListener('pointerup', () => {
+  const now = Date.now();
+  if (now - lastPocketTap < 450) exitPocket();
+  lastPocketTap = now;
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('pocket').hidden) exitPocket(); });
+
+// Android: the Metrolist app plays with the screen off and can join this room.
+const isAndroid = /android/i.test(navigator.userAgent);
+function renderAndroidTip() {
+  $('androidTip').hidden = !isAndroid || !room.code || store.get('lt-android-tip') === 'off';
+}
+$('androidTipClose').onclick = () => { store.set('lt-android-tip', 'off'); renderAndroidTip(); };
+$('copyServer').onclick = () => copy(serverUrl, 'Server address');
+
 function renderPlayState() {
+  syncWakeLock();
+  if (track) $('pocketSong').textContent = `${track.title}${track.artist ? ' — ' + track.artist : ''}`;
   const playing = !!anchor?.playing && !localPause;
   $('playIcon').textContent = $('compactIcon').textContent = playing ? 'pause' : 'play_arrow';
   $('playLabel').textContent = playing ? 'Pause' : localPause ? 'Rejoin' : 'Play';

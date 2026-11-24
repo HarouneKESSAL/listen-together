@@ -32,6 +32,8 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **In chat:** room events (joins, host changes, now playing) appear as quiet lines, a bubble shows unread messages, and 🔥 ❤️ 😂 👏 reactions float up for everyone. The host can also switch on **Let everyone add songs** in the queue panel, so guests' picks go straight into the queue.
 
+**Phones and the screen:** browsers pause YouTube when a phone's screen turns off, so while you're listening the app keeps the screen on, and **Pocket mode** (moon button) shows an all-black screen that uses little battery on OLED phones; double-tap to leave. Locking the phone yourself or switching apps still pauses your music; it rejoins in sync when you come back. On Android, the [Metrolist app](https://github.com/MetrolistGroup/Metrolist/releases/latest) plays with the screen off and can join rooms: set its Listen Together server to this site's server (the app shows a tip with a copy button).
+
 **Your own pause and volume:** guests can pause just for themselves (the room keeps playing; press play to rejoin live), and everyone sets their own volume (on phones, tap the speaker icon; iPhones use the side buttons). If the host's phone locks, the room keeps playing and the host rejoins when they come back.
 
 **Keyboard shortcuts** (computers): Space/K play-pause, ←/→ back/ahead 10 s, N next song, M mute, Q queue, / search. Playback keys work for the host only.
