@@ -28,6 +28,8 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **Share a playlist:** in Playlists, ⋮ → **Share link**. The playlist travels inside the link; opening it offers to save it.
 
+**Vote to skip:** guests tap **Vote to skip** on the now-playing card; when half the people in the room (rounded up) have voted, the song skips for everyone. Votes are sent through chat, which the server stamps with each sender's identity, so nobody can vote for someone else.
+
 **In chat:** room events (joins, host changes, now playing) appear as quiet lines, a bubble shows unread messages, and 🔥 ❤️ 😂 👏 reactions float up for everyone. The host can also switch on **Let everyone add songs** in the queue panel, so guests' picks go straight into the queue.
 
 **Your own pause and volume:** guests can pause just for themselves (the room keeps playing; press play to rejoin live), and everyone sets their own volume (on phones, tap the speaker icon; iPhones use the side buttons). If the host's phone locks, the room keeps playing and the host rejoins when they come back.

@@ -228,6 +228,8 @@ button { cursor: pointer; }
   background: var(--primary); color: var(--on-primary); font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,.3); cursor: pointer; }
 .np-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .reactions { display: flex; gap: 6px; }
+.vote-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vote-row:has(#voteSkip[hidden]):has(#skipVotes:empty) { display: none; }
 .reactions button { width: 40px; height: 36px; border: 0; border-radius: 18px; background: var(--sc-high); font-size: 18px; cursor: pointer; }
 .reactions button:active { transform: scale(.9); }
 .float-react { position: fixed; bottom: 110px; z-index: 30; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -438,6 +440,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="np-actions">
                   <button class="btn-t np-save" id="saveSong" type="button"><span class="ms">bookmark_add</span>Save to playlist</button>
                   <div class="reactions" id="reactions" aria-label="React to this song"></div>
+                </div>
+                <div class="vote-row">
+                  <button class="btn-o" id="voteSkip" type="button" hidden><span class="ms">skip_next</span><span id="voteSkipLabel">Vote to skip</span></button>
+                  <span class="muted body-s" id="skipVotes"></span>
                 </div>
               </div>
               <div class="card lyrics-card" id="lyricsCard" style="order:3" hidden>
@@ -878,6 +884,8 @@ function handle(type, p) {
     case 'suggestion_rejected': snack(p.reason ? `Not added: ${p.reason}` : 'The host declined your suggestion'); break;
     case 'chat_received': {
       const mine = p.user_id === me.id;
+      const vote = p.text.match(/^::vote ([\w-]{11})$/);
+      if (vote) { onSkipVote(p.user_id, p.username, vote[1]); break; }
       const react = p.text.match(/^::react (\S+)$/);
       if (react) { if (REACTIONS.includes(react[1])) floatReaction(react[1], mine ? 'You' : p.username); break; }
       addChat({ name: p.username, text: p.text, mine });
@@ -936,6 +944,7 @@ function onSync(p) {
 function loadTrack(t, anc) {
   const changed = track?.id !== t.id;
   track = t; anchor = anc; stalled = false; startedAt = 0;
+  if (changed) { skipVotes.clear(); skipPassedFor = ''; }
   if (changed) remember(t);
   renderTrack(changed);
   if (!playerReady) return;            // onReady picks it up
@@ -1420,6 +1429,7 @@ function renderRoom() {
 
 function renderPeople() {
   const host = isHost();
+  if (track) setTimeout(checkSkipVote);   // someone left or joined: the number of votes needed may change
   $('people').replaceChildren(...[...room.users].map(([id, u]) => {
     const isRoomHost = id === room.hostId, self = id === me.id;
     const btn = h('button', { class: 'person' + (u.online ? '' : ' offline'), type: 'button', title: u.name },
@@ -1476,6 +1486,7 @@ function renderTrack(changed) {
   if (changed) t ? window.themeFromArtwork?.([safeImg(t.thumbnail), ytThumb(t.id)].filter(Boolean)) : window.themeReset?.();
   if (changed) loadLyrics(t);
   renderQueue();
+  renderSkipVotes();
   $('saveQueue').disabled = !t;
 }
 
@@ -1820,6 +1831,48 @@ $('reactions').replaceChildren(...REACTIONS.map(e => h('button', { type: 'button
   lastReactAt = Date.now();
   send('chat_message', { text: `::react ${e}` });
 } })));
+// ---- vote to skip ----
+// Votes travel as "::vote <track id>" chat lines: the server stamps each with the sender's user id, so a
+// vote can't be cast for someone else. Every page counts the same votes; the host's page does the skip
+// once half of the people in the room (rounded up) have voted for the current song.
+const skipVotes = new Map();   // track id -> Set of user ids
+let skipPassedFor = '';
+const onlineMembers = () => [...room.users].filter(([, u]) => u.online).map(([id]) => id);
+const votesNeeded = () => Math.max(1, Math.ceil(onlineMembers().length / 2));
+const currentVotes = () => [...(skipVotes.get(track?.id) || [])].filter(id => room.users.get(id)?.online);
+
+function onSkipVote(userId, name, trackId) {
+  if (!track || trackId !== track.id) return;   // a vote for a song that's already over
+  if (!skipVotes.has(trackId)) skipVotes.set(trackId, new Set());
+  const votes = skipVotes.get(trackId);
+  if (votes.has(userId)) return;
+  votes.add(userId);
+  addChatEvent(`${userId === me.id ? 'You' : name} voted to skip (${currentVotes().length}/${votesNeeded()})`);
+  checkSkipVote();
+}
+// Also re-checked when people join or leave: fewer listeners can make the existing votes enough.
+function checkSkipVote() {
+  renderSkipVotes();
+  if (!track || skipPassedFor === track.id || currentVotes().length < votesNeeded()) return;
+  skipPassedFor = track.id;
+  addChatEvent('Vote passed: skipping this song');
+  if (!isHost()) return;
+  if (room.queue.length) skipNext();
+  else { player?.pauseVideo(); snack('Vote passed, but nothing is queued. Add a song to keep going.'); }
+}
+function renderSkipVotes() {
+  const votes = currentVotes(), need = votesNeeded(), mine = votes.includes(me.id);
+  $('voteSkip').hidden = isHost() || !track;   // the host just skips
+  $('voteSkip').disabled = mine;
+  $('voteSkipLabel').textContent = mine ? 'You voted to skip' : 'Vote to skip';
+  $('skipVotes').textContent = track && votes.length ? `Skip votes: ${Math.min(votes.length, need)}/${need}` : '';
+}
+$('voteSkip').onclick = () => {
+  if (!track || currentVotes().includes(me.id)) return;
+  if (conn !== 'connected') return snack('Not connected. Try again in a moment.');
+  send('chat_message', { text: `::vote ${track.id}` });
+};
+
 function floatReaction(emoji, name) {
   const el = h('div', { class: 'float-react' }, emoji, h('small', { text: name }));
   el.style.left = `calc(${55 + Math.random() * 35}% - 20px)`;
