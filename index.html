@@ -171,7 +171,9 @@ button { cursor: pointer; }
 .card { background: var(--sc); border: 1px solid var(--outline-variant); border-radius: 28px; padding: 20px; }
 .code-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .code-big { font: 700 32px/40px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--primary); white-space: nowrap; }
-.advanced-link { align-self: center; }
+.lobby-links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.lobby-links a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.lobby-links a .ms { font-size: 18px; }
 .resume-card { display: flex; flex-direction: column; gap: 12px; background: var(--secondary-container); color: var(--on-secondary-container); }
 .resume-card .muted { color: inherit; opacity: .8; }
 .resume-top { display: flex; align-items: center; gap: 12px; }
@@ -413,7 +415,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <span class="ms muted">install_mobile</span>
                 <span class="grow"><span class="name" style="font-weight:400;display:block">Install app</span><span class="muted body-s" style="display:block" id="installHint"></span></span>
               </button>
-              <button class="btn-t advanced-link" id="showAdvanced" type="button">Advanced</button>
+              <div class="lobby-links">
+                <a class="btn-t" href="https://ko-fi.com/harounekessal" target="_blank" rel="noopener" title="Optional tip to keep Listen Together running. It stays free."><span class="ms" style="color:#ff5e5b">favorite</span>Support</a>
+                <button class="btn-t advanced-link" id="showAdvanced" type="button">Advanced</button>
+              </div>
               <button class="row-card settings-card" id="openSettings" type="button" hidden>
                 <span class="ms muted">settings</span>
                 <span class="grow"><span class="name" style="font-weight:400;display:block">Settings</span><span class="muted body-s ellipsis" style="display:block" id="serverLabel"></span></span>

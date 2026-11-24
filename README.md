@@ -6,6 +6,10 @@ Listen to music with friends in real time, from a browser. One person hosts a ro
 
 **Open it:** https://harounekessal.github.io/listen-together/
 
+## Support
+
+Listen Together is free and stays free. If you enjoy it, you can leave an optional tip that helps keep it running: [ko-fi.com/harounekessal](https://ko-fi.com/harounekessal) ♥
+
 ## How to use
 
 1. **Host:** open the page, pick a username, press **Host**. Share the room code or the link from the share button.
