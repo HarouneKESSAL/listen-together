@@ -94,6 +94,8 @@ On Windows, if the Docker build fails in `generate_proto.sh`, convert metroserve
 
 On Windows, after the one-time build in step 1, `start.cmd` starts everything in one go (the `metroserver` container, `server.js`, and an ngrok tunnel). It has this deployment's ngrok domain hard-coded; replace it with your own, or drop the ngrok line if you only need local/Wi-Fi access.
 
+**Usage numbers:** `/stats` on the server (e.g. https://listen-together-f6kt.onrender.com/stats) shows listeners right now and, per day, peak listeners, connections, rooms created, joins, searches and imports. Counts only: no IPs, names, room codes or songs are kept, and the numbers reset when the server restarts.
+
 The API is rate limited per visitor (search 120/min, song matching 400/min, imports 10/min).
 
 ## Notes

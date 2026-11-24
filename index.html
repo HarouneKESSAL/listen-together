@@ -800,8 +800,13 @@ const isHost = () => !!me.id && me.id === room.hostId;
 const expectedPos = () => !anchor ? 0 : anchor.playing ? anchor.pos + (serverNow() - anchor.at) : anchor.pos;
 
 // ---- transport ----
+// sessionLive: the server has confirmed we're in the room on this connection. Between reconnecting and that
+// confirmation, room messages would be answered "not in a room", so they wait (dropped, like when offline).
+let sessionLive = false;
+const SESSION_FREE = new Set(['client_capabilities', 'ping', 'reconnect', 'create_room', 'join_room']);
 function send(type, payload = {}) {
   if (ws?.readyState !== WebSocket.OPEN) return;
+  if (me.token && !sessionLive && !SESSION_FREE.has(type)) return;
   const T = msgType(type);
   const bytes = T ? T.encode(T.fromObject(payload)).finish() : new Uint8Array();
   ws.send(Envelope.encode({ type, payload: bytes }).finish());
@@ -847,6 +852,7 @@ function connect(afterOpen, retry = false) {
   };
   ws.onclose = () => {
     clearTimeout(openTimer);
+    if (sock === ws) sessionLive = false;
     if (leaving || sock !== ws) return;   // ignore a socket we already replaced
     if (!me.token && BACKEND && conn === 'connecting' && Date.now() - connectStarted < WAKE_GRACE_MS) {
       setTimeout(() => { if (!leaving) connect(afterOpen, true); }, 3000);   // host still waking up: keep trying
@@ -859,6 +865,9 @@ function connect(afterOpen, retry = false) {
   };
 }
 
+// Usage counts for the server's /stats page: just "a room was created" / "someone joined", nothing else.
+const beacon = e => fetch(`${BACKEND}/api/event?e=${e}`, { method: 'POST', keepalive: true }).catch(() => {});
+
 function ping() { send('ping', { client_time: Date.now(), sequence: ++pingSeq }); }
 setInterval(ping, 5000);
 
@@ -866,11 +875,12 @@ setInterval(ping, 5000);
 function handle(type, p) {
   switch (type) {
     case 'room_created':
+      beacon('room');
       me = { id: p.user_id, token: p.session_token };
       enterRoom(p.room_code, { host_id: p.user_id, users: [{ user_id: p.user_id, username, is_connected: true }] });
       resumeMusic();
       break;
-    case 'join_approved': me = { id: p.user_id, token: p.session_token }; enterRoom(p.room_code, p.state); break;
+    case 'join_approved': beacon('join'); me = { id: p.user_id, token: p.session_token }; enterRoom(p.room_code, p.state); break;
     case 'reconnected': me.id = p.user_id; enterRoom(p.room_code, p.state); break;
     case 'join_rejected':
       snack('The host declined your request' + (p.reason ? `: ${p.reason}` : ''));
@@ -922,7 +932,9 @@ function handle(type, p) {
     }
     case 'error':
       // Server restarted (redeploy / free host slept) and forgot the room: don't sit in a dead room.
-      if (me.token && ['session_not_found', 'session_expired', 'not_in_room'].includes(p.code)) { roomGone(); break; }
+      // (A "not in a room" reply only means that once the server had confirmed us back in this room.)
+      if (me.token && (['session_not_found', 'session_expired'].includes(p.code) || (p.code === 'not_in_room' && sessionLive))) { roomGone(); break; }
+      if (p.code === 'not_in_room') break;   // raced a reconnect; the room is fine
       snack(p.message || p.code);
       if (!room.code) { joinPending = false; renderLobby(); }
       break;
@@ -931,6 +943,7 @@ function handle(type, p) {
 
 function enterRoom(code, s) {
   joinPending = false;
+  sessionLive = true;
   room.code = code;
   room.hostId = s.host_id;
   room.users = new Map((s.users || []).map(u => [u.user_id, { name: u.username, online: u.is_connected }]));

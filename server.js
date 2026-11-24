@@ -302,6 +302,31 @@ function overLimit(req, kind) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.start >= 60_000) buckets.delete(k); }, 60_000).unref();
 
+// ---- usage numbers: counts only (no IPs, names, room codes or songs), in memory, reset on restart ----
+const startedAt = new Date();
+let liveListeners = 0;
+const days = new Map();   // 'YYYY-MM-DD' (UTC) -> counters, last 30 days
+function today() {
+  const key = new Date().toISOString().slice(0, 10);
+  if (!days.has(key)) {
+    days.set(key, { peak: 0, connections: 0, rooms: 0, joins: 0, searches: 0, imports: 0 });
+    while (days.size > 30) days.delete(days.keys().next().value);
+  }
+  return days.get(key);
+}
+const bump = name => { today()[name]++; };
+
+function statsPage() {
+  const rows = [...days].reverse().map(([day, c]) =>
+    `<tr><td>${day}</td><td>${c.peak}</td><td>${c.connections}</td><td>${c.rooms}</td><td>${c.joins}</td><td>${c.searches}</td><td>${c.imports}</td></tr>`).join('');
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Listen Together stats</title>
+<style>body{font:15px system-ui,sans-serif;margin:24px;background:#141218;color:#e6e0e9}table{border-collapse:collapse}td,th{padding:6px 12px;border-bottom:1px solid #444;text-align:right}th:first-child,td:first-child{text-align:left}.big{font-size:28px;font-weight:700}.muted{color:#999}</style>
+<h1>Listen Together</h1>
+<p><span class="big">${liveListeners}</span> listening right now</p>
+<p class="muted">Counting since ${startedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC (numbers reset when the server restarts). Counts only: no IPs, names or songs are kept.</p>
+<table><tr><th>Day (UTC)</th><th>Peak listeners</th><th>Connections</th><th>Rooms created</th><th>Joins</th><th>Searches</th><th>Imports</th></tr>${rows}</table>`;
+}
+
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...CORS });
   res.end(JSON.stringify(body));
@@ -328,6 +353,7 @@ const server = http.createServer(async (req, res) => {
     }
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
     if (url.pathname === '/api/search') {
+      if (q) bump('searches');
       const type = Object.hasOwn(FILTERS, url.searchParams.get('type')) ? url.searchParams.get('type') : 'songs';
       return json(res, 200, q ? await search(q, type) : []);
     }
@@ -360,6 +386,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, tracks);
     }
     if (url.pathname === '/api/import') {   // Spotify, Deezer or Apple Music playlist/album link
+      bump('imports');
       try {
         const list = await importList((url.searchParams.get('url') || '').trim().slice(0, 500));
         list.tracks = list.tracks.filter(t => t.title).slice(0, MAX_COLLECTION_TRACKS)
@@ -375,6 +402,15 @@ const server = http.createServer(async (req, res) => {
       const title = (url.searchParams.get('title') || '').slice(0, 200), artist = (url.searchParams.get('artist') || '').slice(0, 200);
       if (!title) return json(res, 400, { error: 'Title required' });
       return json(res, 200, await matchSong(title, artist, Number(url.searchParams.get('duration')) || 0));
+    }
+    if (url.pathname === '/api/event') {   // the page reports "room created" / "joined a room" (counts only)
+      const e = url.searchParams.get('e');
+      if (e === 'room') bump('rooms'); else if (e === 'join') bump('joins');
+      return res.writeHead(204, CORS).end();
+    }
+    if (url.pathname === '/stats') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(statsPage());
     }
     if (url.pathname === '/api/suggest') return json(res, 200, q ? await suggest(q) : { queries: [], items: [] });
     res.writeHead(404).end();
@@ -393,6 +429,13 @@ server.on('upgrade', (req, sock, head) => {
     up.write(`${req.method} ${req.url} HTTP/1.1\r\n${headers}\r\n\r\n`);
     up.write(head);
     sock.pipe(up).pipe(sock);
+    // Count this listener while the connection lasts (Metrolist app users included).
+    liveListeners++;
+    const day = today();
+    day.connections++;
+    day.peak = Math.max(day.peak, liveListeners);
+    let counted = true;
+    sock.once('close', () => { if (counted) { counted = false; liveListeners--; } });
   });
   up.on('error', () => sock.destroy());
   sock.on('error', () => up.destroy());
