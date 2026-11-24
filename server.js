@@ -338,7 +338,7 @@ const server = http.createServer(async (req, res) => {
         s.setTimeout(2000, () => { s.destroy(); done(false); });
         s.on('error', () => done(false));
       });
-      return json(res, ok ? 200 : 503, { ok });
+      return json(res, ok ? 200 : 503, { ok, metroserver: process.env.METROSERVER_BUILD || 'unknown' });
     }
     if (url.pathname === '/api/radio') {
       const id = url.searchParams.get('id') || '';

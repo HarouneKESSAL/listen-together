@@ -41,6 +41,7 @@ Playback goes through YouTube's embedded player, so press play once if your brow
 - `index.html` is the whole client: a single static page, no build step.
 - `server.js` is a dependency-free Node server: serves the page, proxies search, and forwards rooms to metroserver.
 - Rooms run on a self-hosted [metroserver](https://github.com/MetrolistGroup/metroserver), the open-source Listen Together server used by Metrolist, over its WebSocket/protobuf protocol.
+- The room server is built from our own copies of [metroserver](https://github.com/HarouneKESSAL/metroserver) and [metroproto](https://github.com/HarouneKESSAL/metroproto). A daily GitHub Action in each copy mirrors the originals' `master` (fast-forward only, so a wiped or rewritten original can't erase the copy), and the build pins an exact tested version. To upgrade, change `METROSERVER_REF` in the `Dockerfile`; `/health` shows the version that's live.
 - Room chat is added on top of metroserver by `metroserver-chat/` (two proto messages + a Go handler with tests), applied by the `Dockerfile` at build time. Clients only get chat if they ask for the `chat` feature, so the Metrolist app is unaffected.
 - Search uses YouTube Music's web API through a small proxy on the same machine as the room server, because browsers can't call that API directly.
 - The room server and search proxy run together in one container on Render's free plan (see below). The first visit after a quiet spell can take up to a minute while it wakes.
