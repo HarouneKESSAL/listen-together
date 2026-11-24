@@ -223,9 +223,22 @@ button { cursor: pointer; }
 .chat-form { display: flex; gap: 8px; align-items: center; }
 .chat-form input { flex: 1; min-width: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--outline-variant); background: transparent; color: inherit; font: inherit; outline: none; }
 .chat-form input:focus { border-color: var(--primary); }
+.chat-line.event { color: var(--on-surface-variant); font-size: 13px; font-style: italic; }
+.chat-pill { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 25; border: 0; border-radius: 20px; padding: 8px 16px;
+  background: var(--primary); color: var(--on-primary); font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,.3); cursor: pointer; }
+.np-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.reactions { display: flex; gap: 6px; }
+.reactions button { width: 40px; height: 36px; border: 0; border-radius: 18px; background: var(--sc-high); font-size: 18px; cursor: pointer; }
+.reactions button:active { transform: scale(.9); }
+.float-react { position: fixed; bottom: 110px; z-index: 30; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 34px; animation: floatUp 2.6s ease-out forwards; }
+.float-react small { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff; }
+@keyframes floatUp { 0% { opacity: 0; transform: translateY(0) scale(.7); } 15% { opacity: 1; transform: translateY(-24px) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-280px) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .float-react { animation: fadeOut 2s ease-out forwards; } @keyframes fadeOut { to { opacity: 0; } } }
 /* playlists */
 .pl-tools { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 8px; }
-.np-save { align-self: flex-start; margin-top: 4px; }
+.np-save { margin-left: -12px; }
 .radio-row { display: flex; align-items: center; gap: 12px; margin: 0 8px 4px; padding: 10px 12px; border-radius: 16px; background: var(--sc-high); cursor: pointer; }
 .radio-row input { width: 20px; height: 20px; accent-color: var(--primary); flex: none; }
 .q-item.clickable { cursor: pointer; }
@@ -422,7 +435,10 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
                 <div class="t ellipsis" id="npTitle"></div>
                 <div class="muted ellipsis" id="npArtist"></div>
                 <div class="bar"><i id="npBar"></i></div>
-                <button class="btn-t np-save" id="saveSong" type="button"><span class="ms">bookmark_add</span>Save to playlist</button>
+                <div class="np-actions">
+                  <button class="btn-t np-save" id="saveSong" type="button"><span class="ms">bookmark_add</span>Save to playlist</button>
+                  <div class="reactions" id="reactions" aria-label="React to this song"></div>
+                </div>
               </div>
               <div class="card lyrics-card" id="lyricsCard" style="order:3" hidden>
                 <div class="section-head">
@@ -517,7 +533,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
         </div>
         <div class="pl-tools">
           <button class="btn-o" id="saveQueue" type="button"><span class="ms">playlist_add</span>Save queue as playlist</button>
-          <div class="muted body-s">Saved on this device. To import one, paste a Spotify, YouTube or YouTube Music playlist link into search.</div>
+          <div class="muted body-s">Saved on this device. To import one, paste a playlist or album link from Spotify, Deezer, Apple Music or YouTube into search.</div>
         </div>
         <div class="q-list" id="plList"></div>
       </aside>
@@ -575,6 +591,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
     <button class="btn-t" type="button" onclick="this.closest('dialog').close()">Close</button>
   </div>
 </dialog>
+<button class="chat-pill" id="chatPill" type="button" hidden></button>
 <div class="snack" id="snack" role="status"></div>
 
 <script type="module">
@@ -827,15 +844,17 @@ function handle(type, p) {
       break;
     case 'join_request': room.pending.set(p.user_id, p.username); renderPeople(); break;
     case 'user_joined': case 'user_reconnected':
+      if (type === 'user_joined' && !room.users.has(p.user_id)) addChatEvent(`${p.username} joined`);
       room.pending.delete(p.user_id);
       room.users.set(p.user_id, { name: p.username, online: true }); renderPeople(); break;
     case 'user_disconnected': { const u = room.users.get(p.user_id); if (u) u.online = false; renderPeople(); break; }
-    case 'user_left': room.users.delete(p.user_id); room.pending.delete(p.user_id); renderPeople(); break;
+    case 'user_left': if (room.users.has(p.user_id)) addChatEvent(`${room.users.get(p.user_id).name} left`); room.users.delete(p.user_id); room.pending.delete(p.user_id); renderPeople(); break;
     case 'host_changed': {
       const wasHost = isHost();
       room.hostId = p.new_host_id;
       if (wasHost && !isHost()) try { localStorage.removeItem('lt-last'); } catch {}   // the new host's device keeps the music now
       snack(`${p.new_host_name} is now the host`);
+      addChatEvent(`${p.new_host_name} is now the host`);
       renderRoom();
       break;
     }
@@ -859,8 +878,10 @@ function handle(type, p) {
     case 'suggestion_rejected': snack(p.reason ? `Not added: ${p.reason}` : 'The host declined your suggestion'); break;
     case 'chat_received': {
       const mine = p.user_id === me.id;
+      const react = p.text.match(/^::react (\S+)$/);
+      if (react) { if (REACTIONS.includes(react[1])) floatReaction(react[1], mine ? 'You' : p.username); break; }
       addChat({ name: p.username, text: p.text, mine });
-      if (!mine && $('room').hidden) snack(`${p.username}: ${p.text}`);   // reading search results: still see it
+      if (!mine && (!chatInView || $('room').hidden || pageHidden())) setUnread(unread + 1);
       break;
     }
     case 'error':
@@ -899,7 +920,11 @@ function onSync(p) {
     moveApprovedToEnd(p);
   }
   switch (p.action) {
-    case 'change_track': loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false }); maybeRadio(); break;
+    case 'change_track':
+      if (p.track_info?.id !== track?.id) addChatEvent(`Now playing: ${p.track_info?.title || ''}${p.track_info?.artist ? ' — ' + p.track_info.artist : ''}`);
+      loadTrack(p.track_info, { pos: 0, at: p.server_time, playing: false });
+      maybeRadio();
+      break;
     case 'play':  anchor = { pos: p.position, at: p.server_time, playing: true };  if (!own) applyAnchor(); break;
     case 'pause': anchor = { pos: p.position, at: p.server_time, playing: false }; if (!own) applyAnchor(); break;
     case 'seek':  anchor = { pos: p.position, at: p.server_time, playing: anchor?.playing ?? false }; if (!own) applyAnchor(); break;
@@ -1142,7 +1167,7 @@ $('q').oninput = () => {
   const v = $('q').value.trim();
   $('qClear').hidden = !v;
   clearTimeout(suggestTimer);
-  if (!v || isLink(v) || spotifyFromLink(v)) return closeSuggest();
+  if (!v || isLink(v) || isMusicServiceLink(v)) return closeSuggest();
   suggestTimer = setTimeout(() => loadSuggest(v), 150);
 };
 $('q').onfocus = () => { if ($('suggest').childElementCount && $('q').value.trim()) $('suggest').hidden = false; };
@@ -1157,8 +1182,7 @@ $('searchForm').onsubmit = async e => {
   e.preventDefault();
   const v = $('q').value.trim();
   if (!v) return;
-  const sp = spotifyFromLink(v);
-  if (sp) { $('q').value = ''; closeSuggest(); return importSpotify(sp); }
+  if (isMusicServiceLink(v)) { $('q').value = ''; closeSuggest(); return importExternal(v); }
   const listId = playlistIdFromLink(v);
   if (listId && isLink(v)) { $('q').value = ''; closeSuggest(); return importPlaylist(listId); }   // playlist / album link
   if (isLink(v)) {                      // pasted links still work
@@ -1185,6 +1209,7 @@ async function loadResults() {
   renderResults();
   try {
     const r = await fetch(`${BACKEND}/api/search?type=${search.type}&q=${encodeURIComponent(search.query)}`, { signal: resultsAbort.signal });
+    search.limited = r.status === 429;
     if (!r.ok) throw new Error();
     search.items = await r.json();
     search.state = 'done';
@@ -1201,7 +1226,7 @@ function renderResults() {
   const list = $('resultList');
   if (search.state === 'loading') return list.replaceChildren(...Array.from({ length: 8 }, () => h('div', { class: 'skel' })));
   if (search.state === 'error') return list.replaceChildren(h('div', { class: 'empty' },
-    h('div', { text: 'Search is unavailable right now.' }), h('button', { class: 'btn-t', type: 'button', onclick: loadResults, text: 'Retry' })));
+    h('div', { text: search.limited ? 'Too many searches. Wait a minute and try again.' : 'Search is unavailable right now.' }), h('button', { class: 'btn-t', type: 'button', onclick: loadResults, text: 'Retry' })));
   if (!search.items.length) return list.replaceChildren(h('div', { class: 'empty', text: 'No results' }));
   const collections = ['albums', 'playlists', 'artists'].includes(search.type);
   list.replaceChildren(...search.items.map(t => collections ? collectionRow(t) : trackRow(t, { kind: search.type === 'videos' ? 'Video' : 'Song' })));
@@ -1600,6 +1625,7 @@ function addToPlaylist(pl, t) {
 function playlistMenu(btn, pl) {
   openMenu(btn, pl.name, [
     ...(isHost() ? [['play_arrow', 'Play now', () => playTracks(pl.tracks, pl.name)], ['playlist_add', 'Add all to queue', () => playTracks(pl.tracks, pl.name, true)]] : []),
+    ['share', 'Share link', () => sharePlaylist(pl)],
     ['edit', 'Rename', async () => { const n = (await askText({ title: 'Rename playlist', label: 'Name', value: pl.name }))?.slice(0, 80); if (n) { pl.name = n; savePlaylists(); } }],
     ['delete', 'Delete', () => { if (confirm(`Delete “${pl.name}”? This can't be undone.`)) { playlists = playlists.filter(x => x !== pl); savePlaylists(); } }],
   ]);
@@ -1618,6 +1644,46 @@ function renderPlaylists() {
       more);
   }) : [h('div', { class: 'empty', text: 'No playlists yet. Save the queue or a song to start one.' })]));
 }
+// Share: the playlist travels inside the link (#playlist=…, compressed), so no account or server storage.
+// The link is untrusted input on the receiving side: only YouTube video IDs and short text are kept.
+const b64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const squeeze = async (data, mode) => new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(
+  mode === 'zip' ? new CompressionStream('deflate-raw') : new DecompressionStream('deflate-raw'))).arrayBuffer());
+async function sharePlaylist(pl) {
+  const packed = JSON.stringify({ n: pl.name, t: pl.tracks.slice(0, 200).map(t => [t.id, t.title, t.artist, Math.round((t.duration || 0) / 1000)]) });
+  const link = `${location.origin}${location.pathname}#playlist=${b64url(await squeeze(new TextEncoder().encode(packed), 'zip'))}`;
+  if (navigator.share) {
+    try { return await navigator.share({ title: pl.name, text: `Listen Together playlist: ${pl.name}`, url: link }); }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  copy(link, 'Playlist link');
+}
+async function openSharedPlaylist() {
+  const m = location.hash.match(/^#playlist=([\w-]+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);   // don't offer it again on reload
+  let shared;
+  try {
+    const raw = JSON.parse(new TextDecoder().decode(await squeeze(unb64url(m[1]), 'unzip')));
+    const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+    shared = {
+      name: str(raw.n, 80) || 'Shared playlist',
+      tracks: (Array.isArray(raw.t) ? raw.t : []).slice(0, 200)
+        .filter(x => Array.isArray(x) && /^[\w-]{11}$/.test(x[0]))
+        .map(([id, title, artist, secs]) => ({ id, title: str(title, 200) || id, artist: str(artist, 200), album: '',
+          duration: Math.max(0, Math.min(Number(secs) || 0, 86400)) * 1000, thumbnail: ytThumb(id) })),
+    };
+  } catch { return snack("That playlist link is damaged or incomplete"); }
+  if (!shared.tracks.length) return snack('That playlist link has no songs');
+  const name = (await askText({ title: 'Save shared playlist', label: 'Name', value: shared.name,
+    hint: `${shared.tracks.length} ${shared.tracks.length === 1 ? 'song' : 'songs'}. Saved on this device; play it in any room you host.` }))?.slice(0, 80);
+  if (!name) return;
+  playlists.unshift({ id: Date.now().toString(36), name, tracks: shared.tracks });
+  savePlaylists();
+  snack(`Saved “${name}”. Find it under Playlists.`);
+}
+
 $('saveQueue').onclick = () => {
   const tracks = [track, ...room.queue].filter(Boolean);
   if (!tracks.length) return snack('Nothing to save yet');
@@ -1649,20 +1715,19 @@ async function importPlaylist(listId) {
   } catch { snack("Couldn't load that playlist. Is it public?"); }
 }
 
-// Spotify playlist/album link: the server reads its song list, then each song is looked up on YouTube Music
-// (Spotify's own audio can't play outside Spotify). Four lookups at a time, with progress.
-const spotifyFromLink = s => {
-  const m = s.match(/open\.spotify\.com\/(?:intl-[\w-]+\/)?(playlist|album)\/([A-Za-z0-9]{22})/) || s.match(/^spotify:(playlist|album):([A-Za-z0-9]{22})$/);
-  return m && { type: m[1], id: m[2] };
-};
-let spotifyBusy = false;
-async function importSpotify({ type, id }) {
+// Spotify / Deezer / Apple Music playlist or album link: the server reads its song list, then each song is
+// looked up on YouTube Music (those services' audio can't play outside their apps). Four lookups at a time.
+const isMusicServiceLink = s => /(open\.spotify\.com|spotify\.link|deezer\.com|deezer\.page\.link|music\.apple\.com)\//i.test(s) || /^spotify:(playlist|album):/i.test(s);
+let importBusy = false;
+async function importExternal(link) {
   if (!isHost()) return snack('Only the host can play a playlist. Host your own room to play it.');
-  if (spotifyBusy) return snack('Already importing a Spotify playlist…');
-  spotifyBusy = true;
+  if (importBusy) return snack('Already importing a playlist…');
+  importBusy = true;
   try {
-    snack('Reading the Spotify playlist…');
-    const r = await fetch(`${BACKEND}/api/spotify?type=${type}&id=${id}`);
+    snack('Reading the playlist…');
+    const r = await fetch(`${BACKEND}/api/import?url=${encodeURIComponent(link)}`);
+    if (r.status === 400) return snack('That link isn’t a Spotify, Deezer or Apple Music playlist or album');
+    if (r.status === 429) return snack('Too many imports. Wait a minute and try again.');
     if (!r.ok) throw new Error();
     const { title, tracks } = await r.json();
     if (!tracks.length) return snack(`“${title}” is empty`);
@@ -1685,8 +1750,8 @@ async function importSpotify({ type, id }) {
     const missed = tracks.length - matched.length;
     setTimeout(() => snack(`Imported ${matched.length} of ${tracks.length} songs from “${title}”` +
       (missed ? ` (${missed} not found on YouTube Music)` : '')), 1500);
-  } catch { snack("Couldn't read that Spotify link. Is the playlist public?"); }
-  finally { spotifyBusy = false; }
+  } catch { snack("Couldn't read that playlist. Is it public?"); }
+  finally { importBusy = false; }
 }
 
 // ---- host switch: everyone adds songs directly ----
@@ -1725,6 +1790,42 @@ function addChat({ name, text, mine }) {
   if (atBottom || mine) log.scrollTop = log.scrollHeight;
 }
 function resetChat() { $('chatLog').replaceChildren(h('div', { class: 'empty', text: 'No messages yet. Say hi!' })); }
+// Room happenings as quiet lines in the chat. Every member sees the same events, so no extra messages are sent.
+function addChatEvent(text) {
+  if (!room.code) return;
+  const log = $('chatLog');
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  if (log.querySelector('.empty')) log.replaceChildren();
+  log.append(h('div', { class: 'chat-line event', text }));
+  while (log.childElementCount > CHAT_KEEP) log.firstElementChild.remove();
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+// Unread messages while the chat is off screen (scrolled away, search open, another app in front).
+let chatInView = false, unread = 0;
+new IntersectionObserver(([e]) => { chatInView = e.isIntersecting; if (chatInView) setUnread(0); }).observe($('chatCard'));
+function setUnread(n) {
+  unread = n;
+  $('chatPill').hidden = !n;
+  $('chatPill').textContent = `💬 ${n} new ${n === 1 ? 'message' : 'messages'}`;
+}
+$('chatPill').onclick = () => { showView('room'); $('chatCard').scrollIntoView({ behavior: 'smooth', block: 'center' }); setUnread(0); };
+document.addEventListener('visibilitychange', () => { if (!pageHidden() && chatInView && !$('room').hidden) setUnread(0); });
+
+// Reactions ride on chat as "::react <emoji>" (same members-only delivery and rate limit) and float up for everyone.
+const REACTIONS = ['🔥', '❤️', '😂', '👏'];
+let lastReactAt = 0;
+$('reactions').replaceChildren(...REACTIONS.map(e => h('button', { type: 'button', title: `React ${e}`, text: e, onclick: () => {
+  if (Date.now() - lastReactAt < 1200) return;   // stay well inside the chat rate limit
+  lastReactAt = Date.now();
+  send('chat_message', { text: `::react ${e}` });
+} })));
+function floatReaction(emoji, name) {
+  const el = h('div', { class: 'float-react' }, emoji, h('small', { text: name }));
+  el.style.left = `calc(${55 + Math.random() * 35}% - 20px)`;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 2700);
+}
 $('chatForm').onsubmit = e => {
   e.preventDefault();
   const text = $('chatInput').value.trim();
@@ -1933,6 +2034,7 @@ $('installApp').onclick = async () => {
 };
 
 // ---- boot ----
+openSharedPlaylist();
 renderInstall();
 renderLobby();
 renderVolIcon();

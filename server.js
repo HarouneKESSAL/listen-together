@@ -168,18 +168,76 @@ async function collection(playlistId) {
   return { title, tracks };
 }
 
+// ---- imports from other services: a link's song list ({ title, tracks: [{ title, artist, duration ms }] }) ----
+// Each service gives names, not audio; the page then finds every song on YouTube Music via /api/match.
+// One retry: these sites occasionally drop a connection.
+async function httpText(url, retry = true) {
+  try {
+    const r = await fetch(url, { headers: { 'user-agent': BROWSER_UA }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw Object.assign(new Error(`${new URL(url).host}: HTTP ${r.status}`), { noRetry: r.status < 500 });
+    return await r.text();
+  } catch (err) {
+    if (!retry || err.noRetry) throw err;
+    return httpText(url, false);
+  }
+}
+const decodeEntities = s => (s || '').replace(/ /g, ' ').replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e) => ({ amp: '&', quot: '"', '#39': "'", apos: "'", lt: '<', gt: '>' })[e]);
+
+async function deezerList(type, id) {   // official public API, no key
+  const j = JSON.parse(await httpText(`https://api.deezer.com/${type}/${id}`));
+  if (j.error || !j.tracks?.data) throw new Error('Deezer: not found');
+  return {
+    title: j.title || 'Deezer playlist',
+    tracks: j.tracks.data.map(t => ({ title: t.title || '', artist: t.artist?.name || '', duration: (t.duration || 0) * 1000 })),
+  };
+}
+
+async function appleList(region, type, id) {   // public page; the song list is in its embedded JSON
+  const html = await httpText(`https://music.apple.com/${region}/${type}/_/${id}`);
+  const data = html.match(/<script type="application\/json" id="serialized-server-data">([\s\S]*?)<\/script>/);
+  const meta = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/);
+  if (!data) throw new Error('Apple Music: no song list');
+  const seen = new Set(), tracks = [];
+  (function walk(n) {
+    if (Array.isArray(n)) n.forEach(walk);
+    else if (n && typeof n === 'object') {
+      if (typeof n.title === 'string' && typeof n.artistName === 'string' && n.duration) {
+        const key = n.title + '\n' + n.artistName;
+        if (!seen.has(key) && seen.add(key)) tracks.push({ title: n.title, artist: n.artistName, duration: n.duration });
+      } else Object.values(n).forEach(walk);
+    }
+  })(JSON.parse(data[1]));
+  let title = '';
+  try { title = JSON.parse(meta[1]).name; } catch {}
+  return { title: title || 'Apple Music playlist', tracks };
+}
+
+// Short share links (link.deezer.com/…, spotify.link/…) redirect to the full one; follow only those hosts.
+const SHORT_LINK_HOSTS = new Set(['link.deezer.com', 'deezer.page.link', 'spotify.link']);
+async function importList(link, depth = 0) {
+  let m;
+  if ((m = link.match(/open\.spotify\.com\/(?:intl-[\w-]+\/)?(playlist|album)\/([A-Za-z0-9]{22})/) || link.match(/^spotify:(playlist|album):([A-Za-z0-9]{22})$/))) return spotifyList(m[1], m[2]);
+  if ((m = link.match(/deezer\.com\/(?:[a-z]{2}\/)?(playlist|album)\/(\d{1,20})/))) return deezerList(m[1], m[2]);
+  if ((m = link.match(/music\.apple\.com\/([a-z]{2})\/(playlist|album)\/(?:[^/?#]*\/)?((?:pl\.)?[\w.-]{1,80})/))) return appleList(m[1], m[2], m[3]);
+  let url;
+  try { url = new URL(link); } catch { throw Object.assign(new Error('bad link'), { status: 400 }); }
+  if (depth === 0 && url.protocol === 'https:' && SHORT_LINK_HOSTS.has(url.hostname)) {
+    const r = await fetch(url, { redirect: 'manual', headers: { 'user-agent': BROWSER_UA }, signal: AbortSignal.timeout(10000) });
+    const target = r.headers.get('location');
+    if (target) return importList(new URL(target, url).href, 1);
+  }
+  throw Object.assign(new Error('unsupported link'), { status: 400 });
+}
+
 // ---- Spotify import: read a public playlist/album's song list, then find each song on YouTube Music ----
 // Uses the public embed page (no Spotify account or API key). Limitation: unofficial page format; if Spotify
 // changes it this breaks, and the fix is the official Web API with a developer app's keys.
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0 Safari/537.36';
 async function spotifyList(type, id) {
-  const r = await fetch(`https://open.spotify.com/embed/${type}/${id}`, { headers: { 'user-agent': BROWSER_UA }, signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error(`Spotify embed: HTTP ${r.status}`);
-  const m = (await r.text()).match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  const m = (await httpText(`https://open.spotify.com/embed/${type}/${id}`)).match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
   const entity = m && JSON.parse(m[1])?.props?.pageProps?.state?.data?.entity;
   if (!entity?.trackList) throw new Error('Spotify embed: no track list');
-  // Some responses carry HTML-escaped text ("&amp;"); decode the common entities.
-  const text = s => (s || '').replace(/ /g, ' ').replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e) => ({ amp: '&', quot: '"', '#39': "'", apos: "'", lt: '<', gt: '>' })[e]);
+  const text = decodeEntities;   // some responses carry HTML-escaped text ("&amp;")
   return {
     title: text(entity.name || entity.title) || 'Spotify playlist',
     tracks: entity.trackList.slice(0, MAX_COLLECTION_TRACKS).map(t => ({
@@ -230,6 +288,20 @@ const CORS = {
   'access-control-expose-headers': 'x-collection-title, x-radio-source',
 };
 
+// ---- per-person rate limits: one visitor can't flood search/imports and get the server blocked by YouTube ----
+// Fixed one-minute windows per IP. Render sits behind Cloudflare, which sets cf-connecting-ip itself
+// (a value sent by the visitor is replaced), so it identifies the real visitor.
+const LIMITS = { api: 120, match: 400, import: 10 };   // requests per minute
+const buckets = new Map();
+const clientIp = req => req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress;
+function overLimit(req, kind) {
+  const key = kind + ' ' + clientIp(req), now = Date.now();
+  let b = buckets.get(key);
+  if (!b || now - b.start >= 60_000) buckets.set(key, b = { start: now, count: 0 });
+  return ++b.count > LIMITS[kind];
+}
+setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now - b.start >= 60_000) buckets.delete(k); }, 60_000).unref();
+
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...CORS });
   res.end(JSON.stringify(body));
@@ -246,6 +318,13 @@ const server = http.createServer(async (req, res) => {
     if (Object.hasOwn(STATIC, url.pathname)) {
       res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': 'no-cache' });
       return res.end(await readFile(new URL('.' + url.pathname, import.meta.url)));
+    }
+    if (url.pathname.startsWith('/api/')) {
+      const kind = url.pathname === '/api/match' ? 'match' : url.pathname === '/api/import' ? 'import' : 'api';
+      if (overLimit(req, kind)) {
+        res.setHeader('retry-after', '60');
+        return json(res, 429, { error: 'Too many requests. Wait a minute and try again.' });
+      }
     }
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
     if (url.pathname === '/api/search') {
@@ -280,10 +359,17 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('x-collection-title', encodeURIComponent(title));
       return json(res, 200, tracks);
     }
-    if (url.pathname === '/api/spotify') {
-      const type = url.searchParams.get('type'), id = url.searchParams.get('id') || '';
-      if (!['playlist', 'album'].includes(type) || !/^[A-Za-z0-9]{22}$/.test(id)) return json(res, 400, { error: 'Bad Spotify link' });
-      return json(res, 200, await spotifyList(type, id));
+    if (url.pathname === '/api/import') {   // Spotify, Deezer or Apple Music playlist/album link
+      try {
+        const list = await importList((url.searchParams.get('url') || '').trim().slice(0, 500));
+        list.tracks = list.tracks.filter(t => t.title).slice(0, MAX_COLLECTION_TRACKS)
+          .map(t => ({ title: decodeEntities(t.title), artist: decodeEntities(t.artist), duration: Number(t.duration) || 0 }));
+        list.title = decodeEntities(list.title);
+        return json(res, 200, list);
+      } catch (err) {
+        if (err.status === 400) return json(res, 400, { error: 'Not a Spotify, Deezer or Apple Music playlist or album link' });
+        throw err;
+      }
     }
     if (url.pathname === '/api/match') {
       const title = (url.searchParams.get('title') || '').slice(0, 200), artist = (url.searchParams.get('artist') || '').slice(0, 200);
@@ -313,4 +399,4 @@ server.on('upgrade', (req, sock, head) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => console.log(`Listen Together web: http://localhost:${PORT}`));
-// Limitation: no rate limiting or caching; add both before exposing this beyond your own network.
+// Limitation: rate limits are per server instance and in memory; fine for one Render instance.
